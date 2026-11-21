@@ -1,0 +1,11 @@
+.git
+.github
+bin/
+obj/
+.vs/
+*.user
+pipeline.json
+pipeline.json.tmp
+Notes
+README.md
+**/probe.yaml
