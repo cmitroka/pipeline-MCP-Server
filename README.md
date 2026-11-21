@@ -1,8 +1,8 @@
 # Job Pipeline MCP
 
-A local [Model Context Protocol](https://modelcontextprotocol.io) server for one job search. Cursor starts it as a console process and talks to it over stdin/stdout. Applications live in a `pipeline.json` file on this machine.
+A local [Model Context Protocol](https://modelcontextprotocol.io) server for one job search. You run it as an ASP.NET Core process and Cursor talks to it over Streamable HTTP. Applications live in a `pipeline.json` file on this machine.
 
-The server is a .NET 10 console app using the official [`ModelContextProtocol`](https://www.nuget.org/packages/ModelContextProtocol) C# SDK and the stdio transport.
+The server is a .NET 10 web app using the official [`ModelContextProtocol.AspNetCore`](https://www.nuget.org/packages/ModelContextProtocol.AspNetCore) C# SDK.
 
 ## What it stores
 
@@ -72,23 +72,23 @@ The file is created the first time an application is added. It is listed in `.gi
 
 `ratePercent` is null when nothing has reached the earlier stage yet, so an empty pipeline is not reported as 0%.
 
-## Build
+## Run
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```powershell
-dotnet build -c Release
+dotnet run
 ```
 
-Rebuild after code changes, then turn the MCP server off and on in Cursor so it loads the new dll.
+The process listens on `http://127.0.0.1:3001`. The MCP endpoint is `http://127.0.0.1:3001/mcp`. Leave this terminal running while Cursor uses the tools.
+
+Optional: set `JOB_PIPELINE_FILE` to pin the data file path. Without it, the server uses `pipeline.json` in the working directory.
 
 ## Register it in Cursor
 
-Cursor starts stdio servers from `mcp.json`. A project file applies to this workspace. A global file applies to every workspace. If both define `job-pipeline`, the project file wins.
+HTTP servers are registered by URL in `mcp.json`. A project file applies to this workspace. A global file applies to every workspace. If both define `job-pipeline`, the project file wins.
 
-Stdout is the protocol channel. The config below runs the built dll, which does not print build output. `dotnet run` writes build messages to stdout and will break the connection.
-
-`JOB_PIPELINE_FILE` is the data file. With it set, the server does not depend on the working directory Cursor happens to use.
+Start the server with `dotnet run` first. Cursor does not launch it for you when the transport is HTTP.
 
 ### This project
 
@@ -98,20 +98,11 @@ Create `.cursor/mcp.json`:
 {
   "mcpServers": {
     "job-pipeline": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": [
-        "${workspaceFolder}/bin/Release/net10.0/JobPipelineMcp.dll"
-      ],
-      "env": {
-        "JOB_PIPELINE_FILE": "${workspaceFolder}/pipeline.json"
-      }
+      "url": "http://127.0.0.1:3001/mcp"
     }
   }
 }
 ```
-
-`${workspaceFolder}` is the folder that contains `.cursor`.
 
 ### Every workspace
 
@@ -121,20 +112,13 @@ Create `C:\Users\chris\.cursor\mcp.json` (merge this entry into `mcpServers` if 
 {
   "mcpServers": {
     "job-pipeline": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": [
-        "C:/Users/chris/Projects/JobPipelineMcp/bin/Release/net10.0/JobPipelineMcp.dll"
-      ],
-      "env": {
-        "JOB_PIPELINE_FILE": "C:/Users/chris/Projects/JobPipelineMcp/pipeline.json"
-      }
+      "url": "http://127.0.0.1:3001/mcp"
     }
   }
 }
 ```
 
-Then open **Cursor Settings → MCP** and enable **job-pipeline**. The first startup log line is the pipeline file path. Server logs are under **View → Output → MCP Logs**.
+Then open **Cursor Settings → MCP** and enable **job-pipeline**. Startup logs show the pipeline file path and the MCP endpoint. Server logs stay in the `dotnet run` terminal.
 
 A useful first prompt:
 

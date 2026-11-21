@@ -1,17 +1,10 @@
 ﻿using JobPipelineMcp;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
 
-// stdout is the MCP JSON-RPC channel. Every log line goes to stderr.
-builder.Logging.ClearProviders();
-builder.Logging.AddConsole(options =>
-{
-    options.LogToStandardErrorThreshold = LogLevel.Trace;
-});
+builder.WebHost.UseUrls("http://127.0.0.1:3001");
+builder.Configuration["AllowedHosts"] = "localhost;127.0.0.1";
 
 builder.Services.AddSingleton(new PipelineStore(ResolvePipelinePath()));
 builder.Services
@@ -29,15 +22,17 @@ builder.Services
             "Rejected and Withdrawn close an application. " +
             "Use an application id from list_applications when company and role could match more than one row.";
     })
-    .WithStdioServerTransport()
+    .WithHttpTransport()
     .WithToolsFromAssembly();
 
-var host = builder.Build();
-var store = host.Services.GetRequiredService<PipelineStore>();
-var logger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("JobPipeline");
+var app = builder.Build();
+var store = app.Services.GetRequiredService<PipelineStore>();
+var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("JobPipeline");
 logger.LogInformation("Pipeline file: {PipelineFile}", store.FilePath);
+logger.LogInformation("MCP endpoint: http://127.0.0.1:3001/mcp");
 
-await host.RunAsync();
+app.MapMcp("/mcp");
+app.Run();
 
 static string ResolvePipelinePath()
 {
