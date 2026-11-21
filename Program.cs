@@ -3,8 +3,8 @@ using ModelContextProtocol.Protocol;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.WebHost.UseUrls("http://127.0.0.1:3001");
-builder.Configuration["AllowedHosts"] = "localhost;127.0.0.1";
+//builder.WebHost.UseUrls("http://127.0.0.1:3001");
+//builder.Configuration["AllowedHosts"] = "localhost;127.0.0.1";
 
 builder.Services.AddSingleton(new PipelineStore(ResolvePipelinePath()));
 builder.Services
@@ -29,11 +29,32 @@ var app = builder.Build();
 var store = app.Services.GetRequiredService<PipelineStore>();
 var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("JobPipeline");
 logger.LogInformation("Pipeline file: {PipelineFile}", store.FilePath);
-logger.LogInformation("MCP endpoint: http://127.0.0.1:3001/mcp");
+logger.LogInformation("MCP endpoint path: /mcp");
+
+var apiKey = app.Configuration["MCP_API_KEY"];
+app.Use(async (context, next) =>
+{
+    if (HttpMethods.IsGet(context.Request.Method) &&
+        (context.Request.Path == "/" || context.Request.Path.StartsWithSegments("/health")))
+    {
+        await next();
+        return;
+    }
+
+    if (string.IsNullOrEmpty(apiKey) ||
+        context.Request.Headers["X-Api-Key"] != apiKey)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+
+    await next();
+});
 
 app.MapGet("/", () => Results.Text(
-    "Job Pipeline MCP is running.\nUse the Streamable HTTP endpoint at /mcp.\n",
+    "Job Pipeline MCP is running.\nUse the Streamable HTTP endpoint at /mcp.\nHealth: /health\n",
     "text/plain"));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 app.MapMcp("/mcp");
 app.Run();
 
