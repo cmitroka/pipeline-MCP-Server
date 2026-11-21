@@ -97,7 +97,9 @@ Repo secrets required:
 
 After a successful run, the MCP URL is:
 
-`https://pipeline-mcp.ashyplant-058759ef.eastus.azurecontainerapps.io/mcp`
+`https://<your-container-app-fqdn>/mcp`
+
+Keep the real FQDN in a local file such as `Notes` (gitignored), not in the repo.
 
 ## Register it in Cursor
 
