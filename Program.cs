@@ -31,6 +31,9 @@ var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Job
 logger.LogInformation("Pipeline file: {PipelineFile}", store.FilePath);
 logger.LogInformation("MCP endpoint: http://127.0.0.1:3001/mcp");
 
+app.MapGet("/", () => Results.Text(
+    "Job Pipeline MCP is running.\nUse the Streamable HTTP endpoint at /mcp.\n",
+    "text/plain"));
 app.MapMcp("/mcp");
 app.Run();
 
