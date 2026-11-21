@@ -1,0 +1,6 @@
+bin/
+obj/
+.vs/
+*.user
+pipeline.json
+pipeline.json.tmp
