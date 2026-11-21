@@ -86,7 +86,7 @@ Optional: set `JOB_PIPELINE_FILE` to pin the data file path. Without it, the ser
 
 ## Deploy to Azure (GitHub Actions)
 
-Pushes to `main` or `http-transport` run `.github/workflows/deploy.yml`. The workflow builds the `Dockerfile`, pushes to ACR `cjmpipelinemcp`, and updates Container App `pipeline-mcp` in resource group `pipeline-mcp-rg`.
+Pushes to `main` run `.github/workflows/deploy.yml`. You can also run it by hand: GitHub → **Actions** → **Deploy to Azure Container Apps** → **Run workflow** (branch `main`). The workflow builds the `Dockerfile`, pushes to ACR `cjmpipelinemcp`, and updates Container App `pipeline-mcp` in resource group `pipeline-mcp-rg`.
 
 Repo secrets required:
 
