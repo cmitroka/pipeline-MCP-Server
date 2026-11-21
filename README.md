@@ -72,7 +72,7 @@ The file is created the first time an application is added. It is listed in `.gi
 
 `ratePercent` is null when nothing has reached the earlier stage yet, so an empty pipeline is not reported as 0%.
 
-## Run
+## Run locally
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
@@ -80,9 +80,24 @@ Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 dotnet run
 ```
 
-The process listens on `http://127.0.0.1:3001`. The MCP endpoint is `http://127.0.0.1:3001/mcp`. Leave this terminal running while Cursor uses the tools.
+By default Kestrel picks a local port (see the startup log). The MCP endpoint path is `/mcp`, and `/health` is for probes. Leave the process running while Cursor uses the tools.
 
-Optional: set `JOB_PIPELINE_FILE` to pin the data file path. Without it, the server uses `pipeline.json` in the working directory.
+Optional: set `JOB_PIPELINE_FILE` to pin the data file path. Without it, the server uses `pipeline.json` in the working directory. Set `MCP_API_KEY` to require an `X-Api-Key` header on `/mcp`.
+
+## Deploy to Azure (GitHub Actions)
+
+Pushes to `main` or `http-transport` run `.github/workflows/deploy.yml`. The workflow builds the `Dockerfile`, pushes to ACR `cjmpipelinemcp`, and updates Container App `pipeline-mcp` in resource group `pipeline-mcp-rg`.
+
+Repo secrets required:
+
+| Secret | Purpose |
+| --- | --- |
+| `AZURE_CREDENTIALS` | Service principal JSON from `az ad sp create-for-rbac ... --sdk-auth` |
+| `MCP_API_KEY` | Value sent to the app as `MCP_API_KEY` |
+
+After a successful run, the MCP URL is:
+
+`https://pipeline-mcp.ashyplant-058759ef.eastus.azurecontainerapps.io/mcp`
 
 ## Register it in Cursor
 

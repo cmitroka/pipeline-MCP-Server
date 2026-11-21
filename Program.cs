@@ -29,7 +29,7 @@ var app = builder.Build();
 var store = app.Services.GetRequiredService<PipelineStore>();
 var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("JobPipeline");
 logger.LogInformation("Pipeline file: {PipelineFile}", store.FilePath);
-logger.LogInformation("MCP endpoint: http://127.0.0.1:3001/mcp");
+logger.LogInformation("MCP endpoint path: /mcp");
 
 var apiKey = app.Configuration["MCP_API_KEY"];
 app.Use(async (context, next) =>
