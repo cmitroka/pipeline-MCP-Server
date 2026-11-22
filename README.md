@@ -79,10 +79,11 @@ The file is created the first time an application is added. It is listed in `.gi
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```powershell
+$env:ASPNETCORE_URLS = "http://127.0.0.1:8080"
 dotnet run
 ```
 
-By default Kestrel picks a local port (see the startup log). The MCP endpoint path is `/mcp`, and `/health` is for probes. Leave the process running while Cursor uses the tools.
+That matches the Cursor URLs below (`http://127.0.0.1:8080/mcp`). `/health` is for probes. Leave the process running while Cursor uses the tools.
 
 Optional env vars:
 
@@ -98,11 +99,15 @@ Docker example with inbox import:
 
 ```powershell
 docker run --rm -p 8080:8080 `
+  -v pipeline-data:/data `
+  -e JOB_PIPELINE_FILE=/data/pipeline.json `
   -e MCP_API_KEY=mitrokatest `
   -e GMAIL_ADDRESS=you@gmail.com `
   -e GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx `
   pipeline-mcp
 ```
+
+The `pipeline-data` volume keeps `pipeline.json` after the container exits.
 
 Typical prompt after that: “Go through inbox receipts and add new jobs to the pipeline.” The model should call `import_inbox_receipts` once.
 
@@ -127,7 +132,7 @@ Keep the real FQDN in a local file such as `Notes` (gitignored), not in the repo
 
 HTTP servers are registered by URL in `mcp.json`. A project file applies to this workspace. A global file applies to every workspace. If both define `job-pipeline`, the project file wins.
 
-Start the server with `dotnet run` first. Cursor does not launch it for you when the transport is HTTP.
+Start the server first (`dotnet run` with `ASPNETCORE_URLS` as above, or Docker on port 8080). Cursor does not launch it for you when the transport is HTTP.
 
 ### This project
 

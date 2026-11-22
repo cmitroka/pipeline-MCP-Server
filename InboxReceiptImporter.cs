@@ -21,36 +21,37 @@ public sealed record InboxReceipt(
 
 public sealed class InboxReceiptImporter
 {
+    // Company captures end at ! or EOS only — not at ".", so Booking.com stays intact.
     private static readonly Regex ThankYouToAt = new(
-        @"thank you for applying to\s+(?<role>.+?)\s+at\s+(?<company>.+?)(?:!|\.|$)",
+        @"thank you for applying to\s+(?<role>.+?)\s+at\s+(?<company>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ThankYouAtCompany = new(
-        @"thank you for applying at\s+(?<company>.+?)(?:!|\.|$)",
+        @"thank you for applying at\s+(?<company>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ApplicationReceivedAt = new(
-        @"application received\s*[-–—:|]\s*(?<role>.+?)\s+at\s+(?<company>.+?)(?:!|\.|$)",
+        @"application received\s*[-–—:|]\s*(?<role>.+?)\s+at\s+(?<company>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ThankYouToDash = new(
-        @"thank you for applying to\s+(?<company>[^-–—]+?)\s*[-–—]\s*(?<role>.+?)(?:!|\.|$)",
+        @"thank you for applying to\s+(?<company>[^-–—]+?)\s*[-–—]\s*(?<role>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ThankYouToPosition = new(
-        @"thank you for applying to(?:\s+the)?\s+(?<role>.+?)\s+position\.?",
+        @"thank you for applying to(?:\s+the)?\s+(?<role>.+?)\s+position\.?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ThankYouToCompany = new(
-        @"thank you for applying to\s+(?<company>.+?)(?:!|\.|$)",
+        @"thank you for applying to\s+(?<company>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ThanksForApplyingTo = new(
-        @"thanks for applying to\s+(?<company>.+?)(?:!|\.|$)",
+        @"thanks for applying to\s+(?<company>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ApplicationDashRole = new(
-        @"thank you for your application\s*[-–—:]\s*(?<role>.+?)(?:\s+at\s+(?<company>.+))?$",
+        @"thank you for your application\s*[-–—:]\s*(?<role>.+?)(?:\s+at\s+(?<company>.+?))?\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex CompanyThankYou = new(
@@ -58,11 +59,11 @@ public sealed class InboxReceiptImporter
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex OpeningAt = new(
-        @"^(?<role>.+?)\s+opening at\s+(?<company>.+?)(?:!|\.|$)",
+        @"^(?<role>.+?)\s+opening at\s+(?<company>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex ConfirmationPipe = new(
-        @"application confirmation\s*[|:-]\s*(?<company>.+)$",
+        @"application confirmation\s*[|:-]\s*(?<company>.+?)\s*!?\s*$",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     // Prefer labeled fields near the top of the body only.
@@ -172,7 +173,7 @@ public sealed class InboxReceiptImporter
             (message.Date != DateTimeOffset.MinValue ? message.Date : DateTimeOffset.UtcNow).LocalDateTime);
         var body = GetPlainText(message);
 
-        var (company, role, fromSubject) = ParseSubject(subject, from);
+        var (company, role, companyFromSubject, roleFromSubject) = ParseSubject(subject, from);
         var roleFromBody = false;
         if (string.IsNullOrWhiteSpace(role) && !string.IsNullOrWhiteSpace(body))
         {
@@ -181,7 +182,14 @@ public sealed class InboxReceiptImporter
         }
 
         if (string.IsNullOrWhiteSpace(company) && !string.IsNullOrWhiteSpace(body))
-            company ??= ParseCompanyFromBody(body);
+        {
+            var bodyCompany = ParseCompanyFromBody(body);
+            if (bodyCompany is not null)
+            {
+                company = bodyCompany;
+                companyFromSubject = true; // labeled body field is explicit, not a sender guess
+            }
+        }
 
         company = NormalizeCompany(company);
         role = NormalizeRole(role, company);
@@ -192,11 +200,13 @@ public sealed class InboxReceiptImporter
             role = null;
 
         var parsed = company is not null && role is not null;
+        // High confidence only when both company and role came from the subject/body text —
+        // never when company was inferred from the From: address (e.g. jane@northwind.com → Jane).
         var confidence = !parsed
             ? "none"
-            : fromSubject && !roleFromBody && TitleHint.IsMatch(role!)
+            : companyFromSubject && roleFromSubject && !roleFromBody && TitleHint.IsMatch(role!)
                 ? "high"
-                : fromSubject || (roleFromBody && TitleHint.IsMatch(role!))
+                : companyFromSubject || roleFromSubject || (roleFromBody && TitleHint.IsMatch(role!))
                     ? "medium"
                     : "low";
 
@@ -211,73 +221,75 @@ public sealed class InboxReceiptImporter
             confidence);
     }
 
-    private static (string? Company, string? Role, bool FromSubject) ParseSubject(string subject, string from)
+    // companyFromSubject / roleFromSubject: true when taken from subject (or labeled body), false when From: guess.
+    private static (string? Company, string? Role, bool CompanyFromSubject, bool RoleFromSubject) ParseSubject(
+        string subject,
+        string from)
     {
         if (string.IsNullOrWhiteSpace(subject))
-            return (CompanyFromAddress(from), null, false);
+            return (CompanyFromAddress(from), null, false, false);
 
         var opening = OpeningAt.Match(subject);
         if (opening.Success)
-            return (opening.Groups["company"].Value, StripJobCode(opening.Groups["role"].Value), true);
+            return (opening.Groups["company"].Value, StripJobCode(opening.Groups["role"].Value), true, true);
 
         var received = ApplicationReceivedAt.Match(subject);
         if (received.Success)
-            return (received.Groups["company"].Value, StripJobCode(received.Groups["role"].Value), true);
+            return (received.Groups["company"].Value, StripJobCode(received.Groups["role"].Value), true, true);
 
         var at = ThankYouToAt.Match(subject);
         if (at.Success)
-            return (at.Groups["company"].Value, StripJobCode(at.Groups["role"].Value), true);
+            return (at.Groups["company"].Value, StripJobCode(at.Groups["role"].Value), true, true);
 
         var dash = ThankYouToDash.Match(subject);
         if (dash.Success)
-            return (dash.Groups["company"].Value, dash.Groups["role"].Value, true);
+            return (dash.Groups["company"].Value, dash.Groups["role"].Value, true, true);
 
         var appDash = ApplicationDashRole.Match(subject);
         if (appDash.Success)
         {
-            var company = appDash.Groups["company"].Success && appDash.Groups["company"].Length > 0
-                ? appDash.Groups["company"].Value
-                : CompanyFromAddress(from);
-            return (company, StripJobCode(appDash.Groups["role"].Value), true);
+            var hasCompany = appDash.Groups["company"].Success && appDash.Groups["company"].Length > 0;
+            var company = hasCompany ? appDash.Groups["company"].Value : CompanyFromAddress(from);
+            return (company, StripJobCode(appDash.Groups["role"].Value), hasCompany, true);
         }
 
         var position = ThankYouToPosition.Match(subject);
         if (position.Success)
-            return (CompanyFromAddress(from), position.Groups["role"].Value, true);
+            return (CompanyFromAddress(from), position.Groups["role"].Value, false, true);
 
         var companyThanks = CompanyThankYou.Match(subject);
         if (companyThanks.Success)
-            return (companyThanks.Groups["company"].Value, null, true);
+            return (companyThanks.Groups["company"].Value, null, true, false);
 
         var confirm = ConfirmationPipe.Match(subject);
         if (confirm.Success)
-            return (confirm.Groups["company"].Value, null, true);
+            return (confirm.Groups["company"].Value, null, true, false);
 
         var atCompany = ThankYouAtCompany.Match(subject);
         if (atCompany.Success)
-            return (atCompany.Groups["company"].Value, null, true);
+            return (atCompany.Groups["company"].Value, null, true, false);
 
         var thanksTo = ThanksForApplyingTo.Match(subject);
         if (thanksTo.Success)
-            return (thanksTo.Groups["company"].Value.TrimEnd('!'), null, true);
+            return (thanksTo.Groups["company"].Value, null, true, false);
 
         var companyOnly = ThankYouToCompany.Match(subject);
         if (companyOnly.Success)
         {
             var company = companyOnly.Groups["company"].Value.Trim();
-            if (company.Equals("!", StringComparison.Ordinal) || company.Length < 2)
-                return (CompanyFromAddress(from), null, false);
+            if (company.Length < 2)
+                return (CompanyFromAddress(from), null, false, false);
 
-            return (company.TrimEnd('!'), null, true);
+            return (company, null, true, false);
         }
 
         if (subject.Contains("thank you for applying", StringComparison.OrdinalIgnoreCase) ||
             subject.Contains("thanks for applying", StringComparison.OrdinalIgnoreCase) ||
             subject.Contains("application received", StringComparison.OrdinalIgnoreCase) ||
             subject.Contains("thank you for your application", StringComparison.OrdinalIgnoreCase))
-            return (CompanyFromAddress(from), null, false);
+            return (CompanyFromAddress(from), null, false, false);
 
-        return (null, null, false);
+        return (null, null, false, false);
     }
 
     private static string? ParseRoleFromBody(string body)
@@ -438,7 +450,10 @@ public sealed class InboxReceiptImporter
             return null;
 
         var text = Regex.Replace(value.Trim(), @"\s+", " ");
-        text = text.Trim('!', '.', ',', ':', ';', '"', '\'', '|');
+        // Strip only trailing sentence punctuation; keep embedded periods (Booking.com).
+        text = text.TrimEnd('!', ',', ':', ';', '"', '\'', '|', ' ');
+        while (text.EndsWith('.') && !Regex.IsMatch(text, @"\.[A-Za-z]{2,}$"))
+            text = text[..^1].TrimEnd();
         return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
