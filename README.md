@@ -16,7 +16,7 @@ Each application has:
 | `stage` | Current stage |
 | `dateApplied` | Date you applied (`YYYY-MM-DD`) |
 | `lastUpdate` | Date of the latest change or note (UTC calendar date) |
-| `payRange` | Free-text pay (or a numeric salary). Set once at create or later via `update_application`; after that it cannot change. Tool responses hide the value unless `bananasKeyword` is `bananas` (`hasPayRange` still indicates whether one is stored) |
+| `payRange` | Free-text pay (or a numeric salary). Set once at create or later via `update_application`; after that it cannot change. Tools never return the amount — only `hasPayRange` |
 | `location` | Optional work location |
 | `link` | Posting or application URL |
 | `notes` | Dated notes. A status update is stored as `"Stage: what happened"` |
@@ -63,7 +63,7 @@ The file is created the first time an application is added. It is listed in `.gi
 
 | Tool | Call it when |
 | --- | --- |
-| `list_applications` | You want to see the pipeline, check a company, or look up an id. Optional `stage` filter. Pass `bananasKeyword=bananas` to reveal pay. |
+| `list_applications` | You want to see the pipeline, check a company, or look up an id. Optional `stage` filter. |
 | `add_application` | You applied, or you want to start tracking a company and role. |
 | `update_application` | Any field change on an existing application (company, title, status, salary/payRange, location, dates, notes, url). Pay can be set only when never set. |
 | `update_status` | Stage move plus a dated note on an application already in the pipeline. Phrases like "2nd interview" also create that round. |

@@ -36,7 +36,7 @@ builder.Services
             "Use search_jobs to fetch public LinkedIn guest listings, then ask which ones to track with add_application. " +
             "Use update_application for any change to an existing application; do not edit pipeline.json directly. " +
             "Pay/salary can be set only when never set; once stored it cannot change. " +
-            "Financial amounts stay hidden unless bananasKeyword is the exact keyword bananas. " +
+            "Stored pay amounts are never returned by tools; hasPayRange only indicates whether pay is stored. " +
             "Use an application id from list_applications when company and role could match more than one row.";
     })
     .WithHttpTransport()

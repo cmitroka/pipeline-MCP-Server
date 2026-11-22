@@ -675,12 +675,10 @@ public sealed class PipelineStore
 
 internal static class FinancialAccess
 {
-    public const string UnlockKeyword = "bananas";
-
-    public static bool IsUnlocked(string? keyword) =>
-        string.Equals(keyword?.Trim(), UnlockKeyword, StringComparison.Ordinal);
-
-    public static object Present(JobApplication application, bool revealFinancials)
+    /// <summary>
+    /// MCP responses never include pay amounts. hasPayRange only indicates whether one is stored.
+    /// </summary>
+    public static object Present(JobApplication application)
     {
         var hasPayRange = !string.IsNullOrWhiteSpace(application.PayRange);
         return new
@@ -691,7 +689,7 @@ internal static class FinancialAccess
             application.Stage,
             application.DateApplied,
             application.LastUpdate,
-            payRange = revealFinancials ? application.PayRange : null,
+            payRange = (string?)null,
             hasPayRange,
             application.Location,
             application.Link,
@@ -701,8 +699,8 @@ internal static class FinancialAccess
         };
     }
 
-    public static IReadOnlyList<object> PresentAll(IEnumerable<JobApplication> applications, bool revealFinancials) =>
-        applications.Select(application => Present(application, revealFinancials)).ToList();
+    public static IReadOnlyList<object> PresentAll(IEnumerable<JobApplication> applications) =>
+        applications.Select(Present).ToList();
 }
 
 internal static class PipelineJson
