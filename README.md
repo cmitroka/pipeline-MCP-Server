@@ -122,6 +122,8 @@ Repo secrets required:
 | `AZURE_CREDENTIALS` | Service principal JSON from `az ad sp create-for-rbac ... --sdk-auth` |
 | `MCP_API_KEY` | Value sent to the app as `MCP_API_KEY` |
 
+Azure persists `pipeline.json` on an Azure Files share mounted at `/mnt/pipeline` (`JOB_PIPELINE_FILE=/mnt/pipeline/pipeline.json`). Storage account `cjmpipelinefiles`, share `pipeline-data`, env storage name `pipelinefiles`. The deploy workflow re-applies that mount after each image update.
+
 After a successful run, the MCP URL is:
 
 `https://<your-container-app-fqdn>/mcp`

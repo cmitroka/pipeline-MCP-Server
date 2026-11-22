@@ -28,4 +28,44 @@ jobs:
           containerAppName: pipeline-mcp
           resourceGroup: pipeline-mcp-rg
           imageToBuild: cjmpipelinemcp.azurecr.io/pipeline-mcp:${{ github.sha }}
-          environmentVariables: MCP_API_KEY=${{ secrets.MCP_API_KEY }}
+          environmentVariables: |
+            MCP_API_KEY=${{ secrets.MCP_API_KEY }}
+            JOB_PIPELINE_FILE=/mnt/pipeline/pipeline.json
+
+      # container-apps-deploy-action can drop volume mounts; re-apply Azure Files after each deploy.
+      - name: Ensure Azure Files mount
+        run: |
+          IMAGE=$(az containerapp show -n pipeline-mcp -g pipeline-mcp-rg --query "properties.template.containers[0].image" -o tsv)
+          cat > /tmp/pipeline-mount.yaml <<EOF
+          properties:
+            template:
+              containers:
+              - name: pipeline-mcp
+                image: ${IMAGE}
+                env:
+                - name: MCP_API_KEY
+                  value: ${{ secrets.MCP_API_KEY }}
+                - name: JOB_PIPELINE_FILE
+                  value: /mnt/pipeline/pipeline.json
+                resources:
+                  cpu: 0.5
+                  memory: 1Gi
+                volumeMounts:
+                - volumeName: pipeline-volume
+                  mountPath: /mnt/pipeline
+                probes:
+                - type: Liveness
+                  httpGet:
+                    path: /health
+                    port: 8080
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+              volumes:
+              - name: pipeline-volume
+                storageType: AzureFile
+                storageName: pipelinefiles
+              scale:
+                minReplicas: 1
+                maxReplicas: 10
+          EOF
+          az containerapp update -n pipeline-mcp -g pipeline-mcp-rg --yaml /tmp/pipeline-mount.yaml
