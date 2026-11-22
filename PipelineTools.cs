@@ -6,7 +6,7 @@ using ModelContextProtocol.Server;
 namespace JobPipelineMcp;
 
 [McpServerToolType]
-public sealed class PipelineTools(PipelineStore store)
+public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSearch, InboxReceiptImporter inbox)
 {
     [McpServerTool(Name = "list_applications", Title = "List applications", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
     [Description(
@@ -96,6 +96,183 @@ public sealed class PipelineTools(PipelineStore store)
         "stillOpen is false for Accepted, Rejected, and Withdrawn.")]
     public string PipelineStats() =>
         PipelineJson.Serialize(store.GetStats(DateOnly.FromDateTime(DateTime.Today)));
+
+    [McpServerTool(Name = "search_jobs", Title = "Search LinkedIn jobs", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = true)]
+    [Description(
+        "Search public LinkedIn guest job listings and return title, company, location, link, and listed time. " +
+        "Call this when the user wants new roles to consider, a LinkedIn search, or help picking postings before tracking them. " +
+        "Do not invent jobs. Show the returned listings and let the user choose which ones to keep. " +
+        "After they pick one, call add_application with that company, role/title, and link. " +
+        "Defaults match a Downingtown PA search for software development/engineering manager or director of software, past week, remote/hybrid, mid-senior/director. " +
+        "Pass searchUrl to reuse a full LinkedIn jobs/search URL. Use start=10, 20, … for the next page. " +
+        "LinkedIn may rate-limit; if that happens, wait and retry.")]
+    public async Task<string> SearchJobs(
+        [Description("Optional keywords override. Defaults to software development/engineering manager OR director of software.")]
+        string? keywords = null,
+        [Description("Optional location override. Defaults to Downingtown, Pennsylvania.")]
+        string? location = null,
+        [Description("Optional distance in miles. Defaults to 50.")]
+        int? distance = null,
+        [Description("Optional LinkedIn f_TPR time filter, for example r86400 (day), r604800 (week), r2592000 (month). Defaults to r604800.")]
+        string? timePosted = null,
+        [Description("Optional LinkedIn f_WT workplace types. 1=on-site, 2=remote, 3=hybrid. Defaults to 2,3.")]
+        string? workplaceTypes = null,
+        [Description("Optional LinkedIn f_E experience levels. Defaults to 4,5 (mid-senior, director).")]
+        string? experienceLevels = null,
+        [Description("Optional full LinkedIn jobs/search URL. When set, its query string is used instead of the other filters.")]
+        string? searchUrl = null,
+        [Description("Result offset for paging. 0 is the first page, then 10, 20, and so on.")]
+        int start = 0,
+        CancellationToken cancellationToken = default)
+    {
+        var (jobs, sourceUrl) = await jobSearch.SearchAsync(
+            keywords,
+            location,
+            distance,
+            timePosted,
+            workplaceTypes,
+            experienceLevels,
+            searchUrl,
+            start,
+            cancellationToken);
+
+        return PipelineJson.Serialize(new
+        {
+            count = jobs.Count,
+            start,
+            sourceUrl,
+            nextStart = start + Math.Max(jobs.Count, 10),
+            instruction = "Present these jobs to the user. When they choose one, call add_application with company, role (title), and link.",
+            jobs,
+        });
+    }
+
+    [McpServerTool(Name = "import_inbox_receipts", Title = "Import inbox receipts", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = true)]
+    [Description(
+        "Scan Gmail for job-application confirmation emails (thank-you-for-applying / application received), " +
+        "parse company, role, and date on the server, dedupe against the pipeline, and optionally add new rows. " +
+        "Call this when the user says to go through inbox receipts and add new jobs to the pipeline. " +
+        "Do not call Gmail tools or open individual emails for this flow — this tool already returns compact results. " +
+        "Requires GMAIL_ADDRESS and GMAIL_APP_PASSWORD on the server (IMAP app password POC). " +
+        "Defaults: last 30 days, up to 50 messages, addNew=true. Pass addNew=false to preview only.")]
+    public async Task<string> ImportInboxReceipts(
+        [Description("How many days of mail to scan. Defaults to 30.")]
+        int daysBack = 30,
+        [Description("Max messages to inspect after search. Defaults to 50.")]
+        int maxMessages = 50,
+        [Description("When true (default), add parsed receipts that are not already in the pipeline. When false, only report candidates.")]
+        bool addNew = true,
+        CancellationToken cancellationToken = default)
+    {
+        var receipts = await inbox.FetchAsync(daysBack, maxMessages, cancellationToken);
+
+        var added = new List<object>();
+        var alreadyTracked = new List<object>();
+        var candidates = new List<object>();
+        var needsReview = new List<object>();
+
+        foreach (var receipt in receipts)
+        {
+            if (!receipt.Parsed || receipt.Company is null || receipt.Role is null)
+            {
+                needsReview.Add(new
+                {
+                    receipt.Subject,
+                    receipt.From,
+                    dateApplied = receipt.DateApplied.ToString("yyyy-MM-dd"),
+                    receipt.Company,
+                    receipt.Role,
+                    confidence = receipt.Confidence,
+                    reason = "Could not parse both company and role",
+                });
+                continue;
+            }
+
+            var existing = store.FindByCompanyRole(receipt.Company, receipt.Role);
+            if (existing is not null)
+            {
+                alreadyTracked.Add(new
+                {
+                    existing.Id,
+                    existing.Company,
+                    existing.Role,
+                    existing.Stage,
+                    receiptSubject = receipt.Subject,
+                    dateApplied = receipt.DateApplied.ToString("yyyy-MM-dd"),
+                });
+                continue;
+            }
+
+            // Only high-confidence parses auto-add. Medium/low stay in needsReview.
+            if (receipt.Confidence != "high")
+            {
+                needsReview.Add(new
+                {
+                    receipt.Subject,
+                    receipt.From,
+                    dateApplied = receipt.DateApplied.ToString("yyyy-MM-dd"),
+                    receipt.Company,
+                    receipt.Role,
+                    confidence = receipt.Confidence,
+                    reason = "Parsed but not high confidence — confirm before adding",
+                });
+                continue;
+            }
+
+            if (!addNew)
+            {
+                candidates.Add(new
+                {
+                    receipt.Subject,
+                    receipt.From,
+                    dateApplied = receipt.DateApplied.ToString("yyyy-MM-dd"),
+                    receipt.Company,
+                    receipt.Role,
+                    confidence = receipt.Confidence,
+                });
+                continue;
+            }
+
+            var application = store.Add(
+                receipt.Company,
+                receipt.Role,
+                StageNames.Applied,
+                receipt.DateApplied,
+                payRange: null,
+                link: null,
+                notes: $"Imported from inbox: {receipt.Subject}");
+
+            added.Add(new
+            {
+                application.Id,
+                application.Company,
+                application.Role,
+                dateApplied = application.DateApplied.ToString("yyyy-MM-dd"),
+                receipt.Subject,
+                confidence = receipt.Confidence,
+            });
+        }
+
+        return PipelineJson.Serialize(new
+        {
+            daysBack,
+            maxMessages,
+            addNew,
+            scanned = receipts.Count,
+            addedCount = added.Count,
+            alreadyTrackedCount = alreadyTracked.Count,
+            candidateCount = candidates.Count,
+            needsReviewCount = needsReview.Count,
+            instruction =
+                "Summarize counts for the user. Only high-confidence receipts are auto-added. " +
+                "If addNew was false, candidates are high-confidence preview rows. " +
+                "For needsReview, ask before calling add_application.",
+            added,
+            alreadyTracked,
+            candidates,
+            needsReview,
+        });
+    }
 
     private static DateOnly ParseDate(string? value, string name)
     {

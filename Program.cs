@@ -3,10 +3,17 @@ using ModelContextProtocol.Protocol;
 
 var builder = WebApplication.CreateBuilder(args);
 
-//builder.WebHost.UseUrls("http://127.0.0.1:3001");
-//builder.Configuration["AllowedHosts"] = "localhost;127.0.0.1";
+// Do not call UseUrls here. Docker/Azure set ASPNETCORE_URLS (e.g. http://+:8080).
+// UseUrls("http://127.0.0.1:3001") overrides that and breaks container port mapping.
 
 builder.Services.AddSingleton(new PipelineStore(ResolvePipelinePath()));
+builder.Services.AddSingleton<InboxReceiptImporter>();
+builder.Services.AddHttpClient<LinkedInJobSearch>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+});
 builder.Services
     .AddMcpServer(options =>
     {
@@ -20,6 +27,9 @@ builder.Services
             "Personal job-search pipeline stored in a local JSON file. " +
             "Funnel order is Applied, Recruiter screen, Interview, Offer, Accepted. " +
             "Rejected and Withdrawn close an application. " +
+            "When the user asks to go through inbox receipts or add jobs from email confirmations, " +
+            "call import_inbox_receipts once — do not open individual Gmail messages for that flow. " +
+            "Use search_jobs to fetch public LinkedIn guest listings, then ask which ones to track with add_application. " +
             "Use an application id from list_applications when company and role could match more than one row.";
     })
     .WithHttpTransport()

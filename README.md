@@ -63,6 +63,8 @@ The file is created the first time an application is added. It is listed in `.gi
 | `add_application` | You applied, or you want to start tracking a company and role. |
 | `update_status` | Something happened on an application already in the pipeline: a reply, interview, offer, rejection, withdrawal, or a note. |
 | `pipeline_stats` | You want counts, conversion rates, or the roles with no update in 10 or more days. |
+| `search_jobs` | You want public LinkedIn guest listings to choose from before calling `add_application`. |
+| `import_inbox_receipts` | You want to scan Gmail application confirmations and add new jobs without opening each email in the model. |
 
 `pipeline_stats` reports:
 
@@ -77,12 +79,37 @@ The file is created the first time an application is added. It is listed in `.gi
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```powershell
+$env:ASPNETCORE_URLS = "http://127.0.0.1:8080"
 dotnet run
 ```
 
-By default Kestrel picks a local port (see the startup log). The MCP endpoint path is `/mcp`, and `/health` is for probes. Leave the process running while Cursor uses the tools.
+That matches the Cursor URLs below (`http://127.0.0.1:8080/mcp`). `/health` is for probes. Leave the process running while Cursor uses the tools.
 
-Optional: set `JOB_PIPELINE_FILE` to pin the data file path. Without it, the server uses `pipeline.json` in the working directory. Set `MCP_API_KEY` to require an `X-Api-Key` header on `/mcp`.
+Optional env vars:
+
+| Variable | Purpose |
+| --- | --- |
+| `JOB_PIPELINE_FILE` | Pin the data file path (default: `pipeline.json` in the working directory) |
+| `MCP_API_KEY` | Require an `X-Api-Key` header on `/mcp` |
+| `GMAIL_ADDRESS` | Gmail address for `import_inbox_receipts` (IMAP) |
+| `GMAIL_APP_PASSWORD` | Gmail [app password](https://myaccount.google.com/apppasswords) (POC; spaces optional) |
+| `IMAP_HOST` / `IMAP_PORT` | Defaults `imap.gmail.com` / `993` |
+
+Docker example with inbox import:
+
+```powershell
+docker run --rm -p 8080:8080 `
+  -v pipeline-data:/data `
+  -e JOB_PIPELINE_FILE=/data/pipeline.json `
+  -e MCP_API_KEY=mitrokatest `
+  -e GMAIL_ADDRESS=you@gmail.com `
+  -e GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx `
+  pipeline-mcp
+```
+
+The `pipeline-data` volume keeps `pipeline.json` after the container exits.
+
+Typical prompt after that: “Go through inbox receipts and add new jobs to the pipeline.” The model should call `import_inbox_receipts` once.
 
 ## Deploy to Azure (GitHub Actions)
 
@@ -105,7 +132,7 @@ Keep the real FQDN in a local file such as `Notes` (gitignored), not in the repo
 
 HTTP servers are registered by URL in `mcp.json`. A project file applies to this workspace. A global file applies to every workspace. If both define `job-pipeline`, the project file wins.
 
-Start the server with `dotnet run` first. Cursor does not launch it for you when the transport is HTTP.
+Start the server first (`dotnet run` with `ASPNETCORE_URLS` as above, or Docker on port 8080). Cursor does not launch it for you when the transport is HTTP.
 
 ### This project
 
@@ -115,7 +142,7 @@ Create `.cursor/mcp.json`:
 {
   "mcpServers": {
     "job-pipeline": {
-      "url": "http://127.0.0.1:3001/mcp"
+      "url": "http://127.0.0.1:8080/mcp"
     }
   }
 }
@@ -129,7 +156,7 @@ Create `C:\Users\chris\.cursor\mcp.json` (merge this entry into `mcpServers` if 
 {
   "mcpServers": {
     "job-pipeline": {
-      "url": "http://127.0.0.1:3001/mcp"
+      "url": "http://127.0.0.1:8080/mcp"
     }
   }
 }
@@ -141,8 +168,6 @@ A useful first prompt:
 
 > I applied to Northwind for a Backend Engineer role, pay range $160-180k. How does the pipeline look, and what has had no update in 10 days?
 
-## Adding a Gmail sync tool later
+## Extending tools
 
-Tools are classes marked `[McpServerToolType]`. `Program.cs` registers every one of them with `WithToolsFromAssembly()`, and `PipelineStore` is the shared singleton that reads and writes `pipeline.json`.
-
-A Gmail tool can be a new class that reads mail and calls `PipelineStore.Add` or `PipelineStore.UpdateStatus`. Rebuild, restart the server, and the new tool is available. The host setup stays the same.
+Tools are classes marked `[McpServerToolType]`. `Program.cs` registers every one of them with `WithToolsFromAssembly()`, and `PipelineStore` is the shared singleton that reads and writes `pipeline.json`. Rebuild, restart the server, and new tools are available.

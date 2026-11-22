@@ -35,6 +35,19 @@ public sealed class PipelineStore
         }
     }
 
+    public JobApplication? FindByCompanyRole(string company, string role)
+    {
+        company = company.Trim();
+        role = role.Trim();
+
+        lock (_gate)
+        {
+            return Load().Applications.FirstOrDefault(application =>
+                string.Equals(application.Company, company, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(application.Role, role, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
     public JobApplication Add(
         string company,
         string role,
