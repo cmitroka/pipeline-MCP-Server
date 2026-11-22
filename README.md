@@ -20,7 +20,10 @@ Each application has:
 | `location` | Optional work location |
 | `link` | Posting or application URL |
 | `notes` | Dated notes. A status update is stored as `"Stage: what happened"` |
+| `interviews` | Numbered interview rounds (1st, 2nd, …), each with date, notes, and people met |
 | `stagesReached` | Stages the application has actually entered, oldest first. Conversion rates use this |
+
+Each interview round has `round`, optional `date` / `notes`, and `contacts[]` with `name`, optional `title`, and `notes` (what you spoke about).
 
 Stages, in funnel order:
 
@@ -63,7 +66,9 @@ The file is created the first time an application is added. It is listed in `.gi
 | `list_applications` | You want to see the pipeline, check a company, or look up an id. Optional `stage` filter. |
 | `add_application` | You applied, or you want to start tracking a company and role. |
 | `update_application` | Any field change on an existing application (company, title, status, salary, location, dates, notes, url). |
-| `update_status` | Stage move plus a dated note on an application already in the pipeline. |
+| `update_status` | Stage move plus a dated note on an application already in the pipeline. Phrases like "2nd interview" also create that round. |
+| `upsert_interview` | Create or update a numbered interview round (1st, 2nd, 3rd, …) with date/notes. |
+| `upsert_interview_contact` | Add or update a person met in a round (name, title, conversation notes). |
 | `pipeline_stats` | You want counts, conversion rates, or the roles with no update in 10 or more days. |
 | `search_jobs` | You want public LinkedIn guest listings to choose from before calling `add_application`. |
 | `import_inbox_receipts` | You want to scan Gmail application confirmations and add new jobs without opening each email in the model. |
