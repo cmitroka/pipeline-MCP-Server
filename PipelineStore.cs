@@ -126,6 +126,7 @@ public sealed class PipelineStore
         string? title,
         string? status,
         double? salary,
+        string? payRange,
         string? location,
         string? appliedDate,
         string? notes,
@@ -137,16 +138,21 @@ public sealed class PipelineStore
         var hasTitle = !string.IsNullOrWhiteSpace(title);
         var hasStatus = !string.IsNullOrWhiteSpace(status);
         var hasSalary = salary.HasValue;
+        var hasPayRange = !string.IsNullOrWhiteSpace(payRange);
         var hasLocation = location is not null;
         var hasAppliedDate = !string.IsNullOrWhiteSpace(appliedDate);
         var hasNotes = !string.IsNullOrWhiteSpace(notes);
         var hasUrl = url is not null;
 
-        if (!hasCompany && !hasTitle && !hasStatus && !hasSalary &&
+        if (!hasCompany && !hasTitle && !hasStatus && !hasSalary && !hasPayRange &&
             !hasLocation && !hasAppliedDate && !hasNotes && !hasUrl)
         {
-            throw new McpException("Nothing to update. Pass at least one of: company, title, status, salary, location, appliedDate, notes, url.");
+            throw new McpException(
+                "Nothing to update. Pass at least one of: company, title, status, salary, payRange, location, appliedDate, notes, url.");
         }
+
+        if (hasSalary && hasPayRange)
+            throw new McpException("Pass salary or payRange, not both.");
 
         DateOnly? parsedApplied = null;
         if (hasAppliedDate)
@@ -189,16 +195,17 @@ public sealed class PipelineStore
                     application.StagesReached.Add(canonicalStatus);
             }
 
-            if (hasSalary)
+            if (hasSalary || hasPayRange)
             {
                 if (!string.IsNullOrWhiteSpace(application.PayRange))
                 {
                     throw new McpException(
-                        "salary can only be set when it was not set at creation. " +
-                        $"This application already has payRange \"{application.PayRange}\".");
+                        "Pay/salary can only be set when it was never set. This application already has pay stored.");
                 }
 
-                application.PayRange = salary!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                application.PayRange = hasPayRange
+                    ? payRange!.Trim()
+                    : salary!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
 
             if (hasLocation)
@@ -229,13 +236,13 @@ public sealed class PipelineStore
 
     public JobApplication UpsertInterview(
         string applicationId,
-        int round,
+        int? round,
         DateOnly? interviewDate,
         string? notes)
     {
         applicationId = Required(applicationId, "id");
-        if (round < 1)
-            throw new McpException("round must be 1 or greater (1 = first interview).");
+        if (round is < 1)
+            throw new McpException("round must be 1 or greater (1 = first interview), or omit it to append the next round.");
 
         lock (_gate)
         {
@@ -243,32 +250,40 @@ public sealed class PipelineStore
             var application = Find(file, applicationId, company: null, role: null);
             application.Interviews ??= [];
 
-            var existing = application.Interviews.FirstOrDefault(item => item.Round == round);
-            if (existing is null)
+            InterviewRound existing;
+            if (round is null)
             {
+                // Omit round → always create a new conversation/round (do not reuse round 1).
                 existing = new InterviewRound
                 {
                     Id = NewId(application.Interviews.Select(item => item.Id).ToList()),
-                    Round = round,
+                    Round = NextInterviewRound(application),
                     Contacts = [],
                 };
                 application.Interviews.Add(existing);
             }
+            else
+            {
+                existing = application.Interviews.FirstOrDefault(item => item.Round == round.Value)
+                    ?? new InterviewRound
+                    {
+                        Id = NewId(application.Interviews.Select(item => item.Id).ToList()),
+                        Round = round.Value,
+                        Contacts = [],
+                    };
+                if (!application.Interviews.Contains(existing))
+                    application.Interviews.Add(existing);
+            }
 
             if (interviewDate.HasValue)
-                existing!.Date = interviewDate;
+                existing.Date = interviewDate;
 
             if (notes is not null)
-                existing!.Notes = BlankToNull(notes);
+                existing.Notes = BlankToNull(notes);
 
             var updatedOn = DateOnly.FromDateTime(DateTime.UtcNow);
-            existing!.LastUpdate = updatedOn;
-
-            application.Stage = StageNames.Interview;
-            if (!application.StagesReached.Contains(StageNames.Interview))
-                application.StagesReached.Add(StageNames.Interview);
-
-            application.LastUpdate = updatedOn;
+            existing.LastUpdate = updatedOn;
+            MarkInterviewStage(application, updatedOn);
             application.Interviews = application.Interviews.OrderBy(item => item.Round).ToList();
 
             Save(file);
@@ -278,15 +293,16 @@ public sealed class PipelineStore
 
     public JobApplication UpsertInterviewContact(
         string applicationId,
-        int round,
+        int? round,
         string? contactId,
         string? name,
         string? title,
-        string? notes)
+        string? notes,
+        DateOnly? interviewDate = null)
     {
         applicationId = Required(applicationId, "id");
-        if (round < 1)
-            throw new McpException("round must be 1 or greater (1 = first interview).");
+        if (round is < 1)
+            throw new McpException("round must be 1 or greater, or omit it to start a new interview round for this person.");
 
         var hasContactId = !string.IsNullOrWhiteSpace(contactId);
         var hasName = !string.IsNullOrWhiteSpace(name);
@@ -299,30 +315,14 @@ public sealed class PipelineStore
             var application = Find(file, applicationId, company: null, role: null);
             application.Interviews ??= [];
 
-            var interview = application.Interviews.FirstOrDefault(item => item.Round == round);
-            if (interview is null)
-            {
-                // Creating a contact implies the round exists.
-                interview = new InterviewRound
-                {
-                    Id = NewId(application.Interviews.Select(item => item.Id).ToList()),
-                    Round = round,
-                    Contacts = [],
-                    LastUpdate = DateOnly.FromDateTime(DateTime.UtcNow),
-                };
-                application.Interviews.Add(interview);
-            }
-
-            interview.Contacts ??= [];
+            InterviewRound interview;
             InterviewContact contact;
+
             if (hasContactId)
             {
-                contact = interview.Contacts.FirstOrDefault(item =>
-                    string.Equals(item.Id, contactId!.Trim(), StringComparison.OrdinalIgnoreCase))
-                    ?? throw new McpException(
-                        $"No contact with id \"{contactId!.Trim()}\" on interview round {round}. " +
-                        "Call list_applications and use a contact id from interviews[].contacts.");
-
+                var match = FindContact(application, contactId!.Trim(), round);
+                interview = match.Interview;
+                contact = match.Contact;
                 if (hasName)
                     contact.Name = name!.Trim();
                 if (title is not null)
@@ -330,8 +330,50 @@ public sealed class PipelineStore
                 if (notes is not null)
                     contact.Notes = BlankToNull(notes);
             }
+            else if (round is null)
+            {
+                // Greg then Kathy: each new person without a round → their own interview round.
+                interview = new InterviewRound
+                {
+                    Id = NewId(application.Interviews.Select(item => item.Id).ToList()),
+                    Round = NextInterviewRound(application),
+                    Date = interviewDate,
+                    Contacts = [],
+                    LastUpdate = DateOnly.FromDateTime(DateTime.UtcNow),
+                };
+                contact = new InterviewContact
+                {
+                    Id = NewId(Array.Empty<string>()),
+                    Name = name!.Trim(),
+                    Title = BlankToNull(title),
+                    Notes = BlankToNull(notes),
+                };
+                interview.Contacts.Add(contact);
+                application.Interviews.Add(interview);
+            }
             else
             {
+                var existingRound = application.Interviews.FirstOrDefault(item => item.Round == round.Value);
+                if (existingRound is null)
+                {
+                    interview = new InterviewRound
+                    {
+                        Id = NewId(application.Interviews.Select(item => item.Id).ToList()),
+                        Round = round.Value,
+                        Date = interviewDate,
+                        Contacts = [],
+                        LastUpdate = DateOnly.FromDateTime(DateTime.UtcNow),
+                    };
+                    application.Interviews.Add(interview);
+                }
+                else
+                {
+                    interview = existingRound;
+                    if (interviewDate.HasValue)
+                        interview.Date = interviewDate;
+                }
+
+                interview.Contacts ??= [];
                 contact = new InterviewContact
                 {
                     Id = NewId(interview.Contacts.Select(item => item.Id).ToList()),
@@ -344,15 +386,46 @@ public sealed class PipelineStore
 
             var updatedOn = DateOnly.FromDateTime(DateTime.UtcNow);
             interview.LastUpdate = updatedOn;
-            application.Stage = StageNames.Interview;
-            if (!application.StagesReached.Contains(StageNames.Interview))
-                application.StagesReached.Add(StageNames.Interview);
-            application.LastUpdate = updatedOn;
+            MarkInterviewStage(application, updatedOn);
             application.Interviews = application.Interviews.OrderBy(item => item.Round).ToList();
 
             Save(file);
             return application;
         }
+    }
+
+    private static int NextInterviewRound(JobApplication application) =>
+        application.Interviews.Count == 0 ? 1 : application.Interviews.Max(item => item.Round) + 1;
+
+    private static void MarkInterviewStage(JobApplication application, DateOnly updatedOn)
+    {
+        application.Stage = StageNames.Interview;
+        if (!application.StagesReached.Contains(StageNames.Interview))
+            application.StagesReached.Add(StageNames.Interview);
+        application.LastUpdate = updatedOn;
+    }
+
+    private static (InterviewRound Interview, InterviewContact Contact) FindContact(
+        JobApplication application,
+        string contactId,
+        int? round)
+    {
+        IEnumerable<InterviewRound> rounds = application.Interviews;
+        if (round is not null)
+            rounds = rounds.Where(item => item.Round == round.Value);
+
+        foreach (var interview in rounds)
+        {
+            var contact = interview.Contacts?.FirstOrDefault(item =>
+                string.Equals(item.Id, contactId, StringComparison.OrdinalIgnoreCase));
+            if (contact is not null)
+                return (interview, contact);
+        }
+
+        throw new McpException(
+            $"No contact with id \"{contactId}\"" +
+            (round is null ? "" : $" on interview round {round}") +
+            ". Call list_applications and use a contact id from interviews[].contacts.");
     }
 
     public PipelineStats GetStats(DateOnly today)
@@ -598,6 +671,36 @@ public sealed class PipelineStore
         var toIndex = application.StagesReached.IndexOf(to);
         return fromIndex >= 0 && toIndex > fromIndex;
     }
+}
+
+internal static class FinancialAccess
+{
+    /// <summary>
+    /// MCP responses never include pay amounts. hasPayRange only indicates whether one is stored.
+    /// </summary>
+    public static object Present(JobApplication application)
+    {
+        var hasPayRange = !string.IsNullOrWhiteSpace(application.PayRange);
+        return new
+        {
+            application.Id,
+            application.Company,
+            application.Role,
+            application.Stage,
+            application.DateApplied,
+            application.LastUpdate,
+            payRange = (string?)null,
+            hasPayRange,
+            application.Location,
+            application.Link,
+            application.Notes,
+            application.Interviews,
+            application.StagesReached,
+        };
+    }
+
+    public static IReadOnlyList<object> PresentAll(IEnumerable<JobApplication> applications) =>
+        applications.Select(Present).ToList();
 }
 
 internal static class PipelineJson

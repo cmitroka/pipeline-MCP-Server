@@ -16,7 +16,7 @@ Each application has:
 | `stage` | Current stage |
 | `dateApplied` | Date you applied (`YYYY-MM-DD`) |
 | `lastUpdate` | Date of the latest change or note (UTC calendar date) |
-| `payRange` | Free-text pay range (or a numeric salary set once via `update_application`) |
+| `payRange` | Free-text pay (or a numeric salary). Set once at create or later via `update_application`; after that it cannot change. Tools never return the amount — only `hasPayRange` |
 | `location` | Optional work location |
 | `link` | Posting or application URL |
 | `notes` | Dated notes. A status update is stored as `"Stage: what happened"` |
@@ -65,10 +65,11 @@ The file is created the first time an application is added. It is listed in `.gi
 | --- | --- |
 | `list_applications` | You want to see the pipeline, check a company, or look up an id. Optional `stage` filter. |
 | `add_application` | You applied, or you want to start tracking a company and role. |
-| `update_application` | Any field change on an existing application (company, title, status, salary, location, dates, notes, url). |
+| `update_application` | Any field change on an existing application (company, title, status, salary/payRange, location, dates, notes, url). Pay can be set only when never set. |
 | `update_status` | Stage move plus a dated note on an application already in the pipeline. Phrases like "2nd interview" also create that round. |
-| `upsert_interview` | Create or update a numbered interview round (1st, 2nd, 3rd, …) with date/notes. |
-| `upsert_interview_contact` | Add or update a person met in a round (name, title, conversation notes). |
+| `upsert_interview` | Create or update a numbered interview round. Omit `round` to append a new one. |
+| `upsert_interview_contact` | Log who you met. Omit `round` when adding so each person gets their own round (Greg=1, Kathy=2). |
+| `server_build_time` | You want the UTC date/time this server binary was built (useful after a deploy). |
 | `pipeline_stats` | You want counts, conversion rates, or the roles with no update in 10 or more days. |
 | `search_jobs` | You want public LinkedIn guest listings to choose from before calling `add_application`. |
 | `import_inbox_receipts` | You want to scan Gmail application confirmations and add new jobs without opening each email in the model. |
