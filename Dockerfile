@@ -9,8 +9,12 @@ COPY JobPipelineMcp.csproj .
 RUN dotnet restore JobPipelineMcp.csproj
 
 # Copy the rest of the source and publish a Release build.
+# Stamp BuildTimestamp so server_build_time /health report when this image was built.
 COPY . .
-RUN dotnet publish JobPipelineMcp.csproj -c Release -o /app --no-restore
+ARG BUILD_TIMESTAMP
+RUN stamp="${BUILD_TIMESTAMP:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" \
+ && dotnet publish JobPipelineMcp.csproj -c Release -o /app --no-restore \
+      -p:BuildTimestamp="$stamp"
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app

@@ -228,6 +228,16 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         });
     }
 
+    [McpServerTool(Name = "server_build_time", Title = "Server build time", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Return when this MCP server binary was built (UTC). " +
+        "Call this when the user asks which build is running, whether a deploy finished, or what version/date the pipeline server is on.")]
+    public string ServerBuildTime() =>
+        PipelineJson.Serialize(new
+        {
+            builtAt = BuildInfo.BuiltAtUtc,
+        });
+
     [McpServerTool(Name = "pipeline_stats", Title = "Pipeline stats", ReadOnly = true, Idempotent = true, Destructive = false, OpenWorld = false)]
     [Description(
         "Summarize the job search pipeline. " +

@@ -69,6 +69,7 @@ The file is created the first time an application is added. It is listed in `.gi
 | `update_status` | Stage move plus a dated note on an application already in the pipeline. Phrases like "2nd interview" also create that round. |
 | `upsert_interview` | Create or update a numbered interview round. Omit `round` to append a new one. |
 | `upsert_interview_contact` | Log who you met. Omit `round` when adding so each person gets their own round (Greg=1, Kathy=2). |
+| `server_build_time` | You want the UTC date/time this server binary was built (useful after a deploy). |
 | `pipeline_stats` | You want counts, conversion rates, or the roles with no update in 10 or more days. |
 | `search_jobs` | You want public LinkedIn guest listings to choose from before calling `add_application`. |
 | `import_inbox_receipts` | You want to scan Gmail application confirmations and add new jobs without opening each email in the model. |
