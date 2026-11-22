@@ -31,11 +31,20 @@ jobs:
           environmentVariables: |
             MCP_API_KEY=${{ secrets.MCP_API_KEY }}
             JOB_PIPELINE_FILE=/mnt/pipeline/pipeline.json
+            GMAIL_ADDRESS=${{ secrets.GMAIL_ADDRESS }}
+            GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}
 
       # container-apps-deploy-action can drop volume mounts; re-apply Azure Files after each deploy.
       - name: Ensure Azure Files mount
+        env:
+          MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: |
           IMAGE=$(az containerapp show -n pipeline-mcp -g pipeline-mcp-rg --query "properties.template.containers[0].image" -o tsv)
+          # Store Gmail app password as a Container App secret, then reference it.
+          az containerapp secret set -n pipeline-mcp -g pipeline-mcp-rg \
+            --secrets "gmail-app-password=${GMAIL_APP_PASSWORD// /}"
           cat > /tmp/pipeline-mount.yaml <<EOF
           properties:
             template:
@@ -44,9 +53,13 @@ jobs:
                 image: ${IMAGE}
                 env:
                 - name: MCP_API_KEY
-                  value: ${{ secrets.MCP_API_KEY }}
+                  value: ${MCP_API_KEY}
                 - name: JOB_PIPELINE_FILE
                   value: /mnt/pipeline/pipeline.json
+                - name: GMAIL_ADDRESS
+                  value: ${GMAIL_ADDRESS}
+                - name: GMAIL_APP_PASSWORD
+                  secretRef: gmail-app-password
                 resources:
                   cpu: 0.5
                   memory: 1Gi
