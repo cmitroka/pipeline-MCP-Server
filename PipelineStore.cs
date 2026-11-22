@@ -227,6 +227,134 @@ public sealed class PipelineStore
         }
     }
 
+    public JobApplication UpsertInterview(
+        string applicationId,
+        int round,
+        DateOnly? interviewDate,
+        string? notes)
+    {
+        applicationId = Required(applicationId, "id");
+        if (round < 1)
+            throw new McpException("round must be 1 or greater (1 = first interview).");
+
+        lock (_gate)
+        {
+            var file = Load();
+            var application = Find(file, applicationId, company: null, role: null);
+            application.Interviews ??= [];
+
+            var existing = application.Interviews.FirstOrDefault(item => item.Round == round);
+            if (existing is null)
+            {
+                existing = new InterviewRound
+                {
+                    Id = NewId(application.Interviews.Select(item => item.Id).ToList()),
+                    Round = round,
+                    Contacts = [],
+                };
+                application.Interviews.Add(existing);
+            }
+
+            if (interviewDate.HasValue)
+                existing!.Date = interviewDate;
+
+            if (notes is not null)
+                existing!.Notes = BlankToNull(notes);
+
+            var updatedOn = DateOnly.FromDateTime(DateTime.UtcNow);
+            existing!.LastUpdate = updatedOn;
+
+            application.Stage = StageNames.Interview;
+            if (!application.StagesReached.Contains(StageNames.Interview))
+                application.StagesReached.Add(StageNames.Interview);
+
+            application.LastUpdate = updatedOn;
+            application.Interviews = application.Interviews.OrderBy(item => item.Round).ToList();
+
+            Save(file);
+            return application;
+        }
+    }
+
+    public JobApplication UpsertInterviewContact(
+        string applicationId,
+        int round,
+        string? contactId,
+        string? name,
+        string? title,
+        string? notes)
+    {
+        applicationId = Required(applicationId, "id");
+        if (round < 1)
+            throw new McpException("round must be 1 or greater (1 = first interview).");
+
+        var hasContactId = !string.IsNullOrWhiteSpace(contactId);
+        var hasName = !string.IsNullOrWhiteSpace(name);
+        if (!hasContactId && !hasName)
+            throw new McpException("Pass name to add a contact, or contactId (and fields to change) to update one.");
+
+        lock (_gate)
+        {
+            var file = Load();
+            var application = Find(file, applicationId, company: null, role: null);
+            application.Interviews ??= [];
+
+            var interview = application.Interviews.FirstOrDefault(item => item.Round == round);
+            if (interview is null)
+            {
+                // Creating a contact implies the round exists.
+                interview = new InterviewRound
+                {
+                    Id = NewId(application.Interviews.Select(item => item.Id).ToList()),
+                    Round = round,
+                    Contacts = [],
+                    LastUpdate = DateOnly.FromDateTime(DateTime.UtcNow),
+                };
+                application.Interviews.Add(interview);
+            }
+
+            interview.Contacts ??= [];
+            InterviewContact contact;
+            if (hasContactId)
+            {
+                contact = interview.Contacts.FirstOrDefault(item =>
+                    string.Equals(item.Id, contactId!.Trim(), StringComparison.OrdinalIgnoreCase))
+                    ?? throw new McpException(
+                        $"No contact with id \"{contactId!.Trim()}\" on interview round {round}. " +
+                        "Call list_applications and use a contact id from interviews[].contacts.");
+
+                if (hasName)
+                    contact.Name = name!.Trim();
+                if (title is not null)
+                    contact.Title = BlankToNull(title);
+                if (notes is not null)
+                    contact.Notes = BlankToNull(notes);
+            }
+            else
+            {
+                contact = new InterviewContact
+                {
+                    Id = NewId(interview.Contacts.Select(item => item.Id).ToList()),
+                    Name = name!.Trim(),
+                    Title = BlankToNull(title),
+                    Notes = BlankToNull(notes),
+                };
+                interview.Contacts.Add(contact);
+            }
+
+            var updatedOn = DateOnly.FromDateTime(DateTime.UtcNow);
+            interview.LastUpdate = updatedOn;
+            application.Stage = StageNames.Interview;
+            if (!application.StagesReached.Contains(StageNames.Interview))
+                application.StagesReached.Add(StageNames.Interview);
+            application.LastUpdate = updatedOn;
+            application.Interviews = application.Interviews.OrderBy(item => item.Round).ToList();
+
+            Save(file);
+            return application;
+        }
+    }
+
     public PipelineStats GetStats(DateOnly today)
     {
         lock (_gate)
@@ -345,6 +473,22 @@ public sealed class PipelineStore
         application.Company = application.Company?.Trim() ?? "";
         application.Role = application.Role?.Trim() ?? "";
         application.Notes ??= [];
+        application.Interviews ??= [];
+        foreach (var interview in application.Interviews)
+        {
+            interview.Id = string.IsNullOrWhiteSpace(interview.Id)
+                ? NewId(application.Interviews.Select(item => item.Id).ToList())
+                : interview.Id.Trim();
+            interview.Contacts ??= [];
+            foreach (var contact in interview.Contacts)
+            {
+                contact.Id = string.IsNullOrWhiteSpace(contact.Id)
+                    ? NewId(interview.Contacts.Select(item => item.Id).ToList())
+                    : contact.Id.Trim();
+                contact.Name = contact.Name?.Trim() ?? "";
+            }
+        }
+
         application.StagesReached ??= [];
 
         if (StageNames.TryCanonicalize(application.Stage, out var stage))
@@ -419,9 +563,14 @@ public sealed class PipelineStore
         return [StageNames.Applied, stage];
     }
 
-    private static string NewId(IReadOnlyList<JobApplication> applications)
+    private static string NewId(IReadOnlyList<JobApplication> applications) =>
+        NewId(applications.Select(application => application.Id).ToList());
+
+    private static string NewId(IReadOnlyList<string> existingIds)
     {
-        var used = applications.Select(application => application.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var used = existingIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         for (var attempt = 0; attempt < 5; attempt++)
         {
             var id = Guid.NewGuid().ToString("N")[..8];

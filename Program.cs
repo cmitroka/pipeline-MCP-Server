@@ -27,6 +27,8 @@ builder.Services
             "Personal job-search pipeline stored in a local JSON file. " +
             "Funnel order is Applied, Recruiter screen, Interview, Offer, Accepted. " +
             "Rejected and Withdrawn close an application. " +
+            "Interview rounds are numbered (1st, 2nd, 3rd). Use upsert_interview for the round, " +
+            "and upsert_interview_contact for who they met (name, title, what you spoke about). " +
             "When the user asks to go through inbox receipts or add jobs from email confirmations, " +
             "call import_inbox_receipts once — do not open individual Gmail messages for that flow. " +
             "Use search_jobs to fetch public LinkedIn guest listings, then ask which ones to track with add_application. " +

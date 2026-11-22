@@ -14,7 +14,8 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         "Call this when the user asks what they have applied to, wants the status of a company or role, or needs an id before a status update. " +
         "Pass stage to return only applications currently in that stage; omit it to return every application. " +
         "Stage names: Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, Withdrawn. " +
-        "Phone screen and screening match Recruiter screen. Onsite matches Interview.")]
+        "Phone screen and screening match Recruiter screen. Onsite / 2nd interview map to Interview. " +
+        "Numbered interview rounds and people met live under applications[].interviews.")]
     public string ListApplications(
         [Description("Optional current stage to keep. Omit to list every application. Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, or Withdrawn.")]
         string? stage = null)
@@ -120,9 +121,82 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
     {
         var noteDate = ParseDate(date, "date");
         var application = store.UpdateStatus(id, company, role, stage, note, noteDate);
+
+        // "I'm in the 2nd interview" → also ensure that round exists under interviews[].
+        if (StageNames.TryParseInterviewRound(stage, out var round))
+            application = store.UpsertInterview(application.Id, round, interviewDate: noteDate, notes: null);
+
         return PipelineJson.Serialize(new
         {
             message = $"Updated {application.Company}, {application.Role} (id {application.Id}) to {application.Stage}.",
+            application,
+        });
+    }
+
+    [McpServerTool(Name = "upsert_interview", Title = "Upsert interview round", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Create or update a numbered interview round on an application (1 = first, 2 = second, …). " +
+        "Call this when the user says they have a 1st/2nd/3rd interview, or wants to set the date or notes for that round. " +
+        "Sets the application stage to Interview. " +
+        "To record who they met, follow with upsert_interview_contact. " +
+        "Pass application id from list_applications.")]
+    public string UpsertInterview(
+        [Description("Application id from list_applications.")]
+        string id,
+        [Description("Interview round number. 1 = first interview, 2 = second, and so on.")]
+        int round,
+        [Description("Date of the interview as YYYY-MM-DD. Optional.")]
+        string? date = null,
+        [Description("Notes about the round overall (agenda, outcome). Optional; pass empty string to clear.")]
+        string? notes = null)
+    {
+        DateOnly? interviewDate = null;
+        if (!string.IsNullOrWhiteSpace(date))
+            interviewDate = ParseDate(date, "date");
+
+        // Distinguish omitted notes (null → leave) from explicit clear ("" → clear).
+        string? notesArg = notes;
+        var application = store.UpsertInterview(id, round, interviewDate, notesArg);
+        var interview = application.Interviews.First(item => item.Round == round);
+        return PipelineJson.Serialize(new
+        {
+            message = $"Interview round {round} saved on {application.Company}, {application.Role} (id {application.Id}).",
+            interview,
+            application,
+        });
+    }
+
+    [McpServerTool(Name = "upsert_interview_contact", Title = "Upsert interview contact", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Add or update a person met in an interview round. " +
+        "Call this when the user names who they interviewed with, their title, or what they spoke about. " +
+        "To add: pass application id, round, and name (title/notes optional). " +
+        "To update: pass contactId from list_applications (interviews[].contacts) plus any fields to change. " +
+        "Creates the interview round if it does not exist yet.")]
+    public string UpsertInterviewContact(
+        [Description("Application id from list_applications.")]
+        string id,
+        [Description("Interview round number this person belongs to. 1 = first interview, 2 = second, …")]
+        int round,
+        [Description("Contact id from interviews[].contacts when updating an existing person. Omit when adding.")]
+        string? contactId = null,
+        [Description("Person's name. Required when adding; optional when updating.")]
+        string? name = null,
+        [Description("Person's title, for example Engineering Manager. Pass empty string to clear.")]
+        string? title = null,
+        [Description("Notes on what you spoke about with this person. Pass empty string to clear.")]
+        string? notes = null)
+    {
+        var application = store.UpsertInterviewContact(id, round, contactId, name, title, notes);
+        var interview = application.Interviews.First(item => item.Round == round);
+        var contact = !string.IsNullOrWhiteSpace(contactId)
+            ? interview.Contacts.First(item => string.Equals(item.Id, contactId.Trim(), StringComparison.OrdinalIgnoreCase))
+            : interview.Contacts.Last();
+        return PipelineJson.Serialize(new
+        {
+            message = $"Contact {contact.Name} saved on interview round {round} for {application.Company}, {application.Role}.",
+            contact,
+            interview,
             application,
         });
     }
