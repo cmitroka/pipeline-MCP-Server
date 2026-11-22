@@ -120,6 +120,113 @@ public sealed class PipelineStore
         }
     }
 
+    public JobApplication UpdateApplication(
+        string id,
+        string? company,
+        string? title,
+        string? status,
+        double? salary,
+        string? location,
+        string? appliedDate,
+        string? notes,
+        string? url)
+    {
+        id = Required(id, "id");
+
+        var hasCompany = !string.IsNullOrWhiteSpace(company);
+        var hasTitle = !string.IsNullOrWhiteSpace(title);
+        var hasStatus = !string.IsNullOrWhiteSpace(status);
+        var hasSalary = salary.HasValue;
+        var hasLocation = location is not null;
+        var hasAppliedDate = !string.IsNullOrWhiteSpace(appliedDate);
+        var hasNotes = !string.IsNullOrWhiteSpace(notes);
+        var hasUrl = url is not null;
+
+        if (!hasCompany && !hasTitle && !hasStatus && !hasSalary &&
+            !hasLocation && !hasAppliedDate && !hasNotes && !hasUrl)
+        {
+            throw new McpException("Nothing to update. Pass at least one of: company, title, status, salary, location, appliedDate, notes, url.");
+        }
+
+        DateOnly? parsedApplied = null;
+        if (hasAppliedDate)
+        {
+            if (!DateOnly.TryParseExact(
+                    appliedDate!.Trim(),
+                    "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out var date))
+            {
+                throw new McpException($"appliedDate must be YYYY-MM-DD. Received \"{appliedDate.Trim()}\".");
+            }
+
+            parsedApplied = date;
+        }
+
+        string? canonicalStatus = null;
+        if (hasStatus)
+            canonicalStatus = StageNames.Require(status);
+
+        if (hasSalary && salary is <= 0)
+            throw new McpException("salary must be a positive number.");
+
+        lock (_gate)
+        {
+            var file = Load();
+            var application = Find(file, id, company: null, role: null);
+
+            if (hasCompany)
+                application.Company = company!.Trim();
+
+            if (hasTitle)
+                application.Role = title!.Trim();
+
+            if (canonicalStatus is not null)
+            {
+                application.Stage = canonicalStatus;
+                if (!application.StagesReached.Contains(canonicalStatus))
+                    application.StagesReached.Add(canonicalStatus);
+            }
+
+            if (hasSalary)
+            {
+                if (!string.IsNullOrWhiteSpace(application.PayRange))
+                {
+                    throw new McpException(
+                        "salary can only be set when it was not set at creation. " +
+                        $"This application already has payRange \"{application.PayRange}\".");
+                }
+
+                application.PayRange = salary!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            if (hasLocation)
+                application.Location = BlankToNull(location);
+
+            if (parsedApplied is not null)
+                application.DateApplied = parsedApplied.Value;
+
+            if (hasUrl)
+                application.Link = BlankToNull(url);
+
+            var updatedOn = DateOnly.FromDateTime(DateTime.UtcNow);
+            if (hasNotes)
+            {
+                application.Notes.Add(new Note
+                {
+                    Date = updatedOn,
+                    Text = notes!.Trim(),
+                });
+            }
+
+            application.LastUpdate = updatedOn;
+
+            Save(file);
+            return application;
+        }
+    }
+
     public PipelineStats GetStats(DateOnly today)
     {
         lock (_gate)

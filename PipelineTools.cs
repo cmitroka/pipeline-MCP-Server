@@ -33,7 +33,9 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         "Save a new job application in the local pipeline. " +
         "Call this when the user says they applied, wants to start tracking a company and role, or gives you a posting to remember. " +
         "Company and role are required. Stage defaults to Applied and dateApplied defaults to today. " +
-        "Use this for a new application. Use update_status when an application already in the pipeline moves forward or gets a note.")]
+        "Use this for a new application. " +
+        "Use update_application for any change to an existing application (company, title, status, salary, location, dates, notes, url). " +
+        "Use update_status when you only need to move the stage and append a stage-dated note.")]
     public string AddApplication(
         [Description("Company name, for example Northwind.")] string company,
         [Description("Role title, for example Backend Engineer.")] string role,
@@ -57,10 +59,48 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         });
     }
 
+    [McpServerTool(Name = "update_application", Title = "Update application", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
+    [Description(
+        "Change fields on an existing application by id. " +
+        "Use this tool for any change to an existing application: company, title (role), status (stage), salary, location, appliedDate, notes, or url. " +
+        "Pass only the fields to change; omitted fields stay as-is. " +
+        "salary may be set only when it was not already set. status must be an allowed stage. " +
+        "Do not edit pipeline.json directly — call this tool instead. " +
+        "For a stage move that also needs a \"Stage: note\" history line, update_status is still fine.")]
+    public string UpdateApplication(
+        [Description("Application id from list_applications.")]
+        string id,
+        [Description("New company name.")]
+        string? company = null,
+        [Description("New role title.")]
+        string? title = null,
+        [Description("New stage. Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, or Withdrawn.")]
+        string? status = null,
+        [Description("Salary as a positive number. Only allowed when pay/salary was not set before.")]
+        double? salary = null,
+        [Description("Work location text, for example Remote or Philadelphia, PA. Pass empty string to clear.")]
+        string? location = null,
+        [Description("Applied date as YYYY-MM-DD.")]
+        string? appliedDate = null,
+        [Description("Note to append on the application (dated with today's UTC date).")]
+        string? notes = null,
+        [Description("Posting or application URL. Pass empty string to clear.")]
+        string? url = null)
+    {
+        var application = store.UpdateApplication(
+            id, company, title, status, salary, location, appliedDate, notes, url);
+        return PipelineJson.Serialize(new
+        {
+            message = $"Updated application {application.Id} ({application.Company}, {application.Role}).",
+            application,
+        });
+    }
+
     [McpServerTool(Name = "update_status", Title = "Update status", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
     [Description(
         "Set a stage on an existing application and append a dated note. " +
         "Call this when the user reports a recruiter reply, phone screen, interview, offer, acceptance, rejection, withdrawal, or any follow-up that belongs on an application already in the pipeline. " +
+        "For other field edits (company, title, salary, location, url, applied date), use update_application instead. " +
         "Pass id from list_applications when you have it. Otherwise pass company and role, which must match exactly one application. " +
         "The note is stored as \"Stage: note\" and dated with date (YYYY-MM-DD, default today). " +
         "Pass the application's current stage when the stage is unchanged and only the note is new.")]
