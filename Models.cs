@@ -199,12 +199,8 @@ public static class StageNames
             parts[1] is "interview" or "round" or "loop" or "interviews")
             return true;
 
-        if (t is "interview" or "onsite" or "on-site" or "on site")
-        {
-            round = 1;
-            return true;
-        }
-
+        // Bare "Interview" / "onsite" is a stage only — not a specific round.
+        // Numbered phrases above create distinct rounds (Greg = 1, Kathy = 2, …).
         return false;
     }
 

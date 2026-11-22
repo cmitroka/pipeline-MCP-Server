@@ -15,17 +15,22 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         "Pass stage to return only applications currently in that stage; omit it to return every application. " +
         "Stage names: Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, Withdrawn. " +
         "Phone screen and screening match Recruiter screen. Onsite / 2nd interview map to Interview. " +
-        "Numbered interview rounds and people met live under applications[].interviews.")]
+        "Numbered interview rounds and people met live under applications[].interviews. " +
+        "payRange is hidden unless bananas is passed as bananasKeyword; hasPayRange still shows whether pay is stored.")]
     public string ListApplications(
         [Description("Optional current stage to keep. Omit to list every application. Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, or Withdrawn.")]
-        string? stage = null)
+        string? stage = null,
+        [Description("Pass the exact keyword bananas to include payRange values. Omit to keep financial amounts hidden.")]
+        string? bananasKeyword = null)
     {
+        var reveal = FinancialAccess.IsUnlocked(bananasKeyword);
         var applications = store.List(stage);
         return PipelineJson.Serialize(new
         {
             stage = string.IsNullOrWhiteSpace(stage) ? "all" : StageNames.Require(stage),
             count = applications.Count,
-            applications,
+            financialsRevealed = reveal,
+            applications = FinancialAccess.PresentAll(applications, reveal),
         });
     }
 
@@ -35,8 +40,9 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         "Call this when the user says they applied, wants to start tracking a company and role, or gives you a posting to remember. " +
         "Company and role are required. Stage defaults to Applied and dateApplied defaults to today. " +
         "Use this for a new application. " +
-        "Use update_application for any change to an existing application (company, title, status, salary, location, dates, notes, url). " +
-        "Use update_status when you only need to move the stage and append a stage-dated note.")]
+        "Use update_application for any change to an existing application (company, title, status, salary, payRange, location, dates, notes, url). " +
+        "Use update_status when you only need to move the stage and append a stage-dated note. " +
+        "payRange in the response is hidden unless bananasKeyword is bananas.")]
     public string AddApplication(
         [Description("Company name, for example Northwind.")] string company,
         [Description("Role title, for example Backend Engineer.")] string role,
@@ -49,25 +55,30 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         [Description("Optional URL for the posting or the application.")]
         string? link = null,
         [Description("Optional note recorded on the applied date, such as a referral or which site it was sent from.")]
-        string? notes = null)
+        string? notes = null,
+        [Description("Pass the exact keyword bananas to include payRange in the response. Omit to keep financial amounts hidden.")]
+        string? bananasKeyword = null)
     {
         var appliedOn = ParseDate(dateApplied, "dateApplied");
         var application = store.Add(company, role, stage, appliedOn, payRange, link, notes);
+        var reveal = FinancialAccess.IsUnlocked(bananasKeyword);
         return PipelineJson.Serialize(new
         {
             message = $"Added {application.Company}, {application.Role} (id {application.Id}) at stage {application.Stage}.",
-            application,
+            financialsRevealed = reveal,
+            application = FinancialAccess.Present(application, reveal),
         });
     }
 
     [McpServerTool(Name = "update_application", Title = "Update application", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
     [Description(
         "Change fields on an existing application by id. " +
-        "Use this tool for any change to an existing application: company, title (role), status (stage), salary, location, appliedDate, notes, or url. " +
+        "Use this tool for any change to an existing application: company, title (role), status (stage), salary, payRange, location, appliedDate, notes, or url. " +
         "Pass only the fields to change; omitted fields stay as-is. " +
-        "salary may be set only when it was not already set. status must be an allowed stage. " +
+        "salary or payRange may be set only when pay was never set; once set, it cannot be changed. status must be an allowed stage. " +
         "Do not edit pipeline.json directly — call this tool instead. " +
-        "For a stage move that also needs a \"Stage: note\" history line, update_status is still fine.")]
+        "For a stage move that also needs a \"Stage: note\" history line, update_status is still fine. " +
+        "payRange in the response is hidden unless bananasKeyword is bananas.")]
     public string UpdateApplication(
         [Description("Application id from list_applications.")]
         string id,
@@ -77,8 +88,10 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         string? title = null,
         [Description("New stage. Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, or Withdrawn.")]
         string? status = null,
-        [Description("Salary as a positive number. Only allowed when pay/salary was not set before.")]
+        [Description("Salary as a positive number. Only allowed when pay was never set. Pass salary or payRange, not both.")]
         double? salary = null,
+        [Description("Pay range as text, for example $160-180k. Only allowed when pay was never set. Pass salary or payRange, not both.")]
+        string? payRange = null,
         [Description("Work location text, for example Remote or Philadelphia, PA. Pass empty string to clear.")]
         string? location = null,
         [Description("Applied date as YYYY-MM-DD.")]
@@ -86,14 +99,18 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         [Description("Note to append on the application (dated with today's UTC date).")]
         string? notes = null,
         [Description("Posting or application URL. Pass empty string to clear.")]
-        string? url = null)
+        string? url = null,
+        [Description("Pass the exact keyword bananas to include payRange in the response. Omit to keep financial amounts hidden.")]
+        string? bananasKeyword = null)
     {
         var application = store.UpdateApplication(
-            id, company, title, status, salary, location, appliedDate, notes, url);
+            id, company, title, status, salary, payRange, location, appliedDate, notes, url);
+        var reveal = FinancialAccess.IsUnlocked(bananasKeyword);
         return PipelineJson.Serialize(new
         {
             message = $"Updated application {application.Id} ({application.Company}, {application.Role}).",
-            application,
+            financialsRevealed = reveal,
+            application = FinancialAccess.Present(application, reveal),
         });
     }
 
@@ -101,12 +118,15 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
     [Description(
         "Set a stage on an existing application and append a dated note. " +
         "Call this when the user reports a recruiter reply, phone screen, interview, offer, acceptance, rejection, withdrawal, or any follow-up that belongs on an application already in the pipeline. " +
-        "For other field edits (company, title, salary, location, url, applied date), use update_application instead. " +
+        "For other field edits (company, title, salary, payRange, location, url, applied date), use update_application instead. " +
         "Pass id from list_applications when you have it. Otherwise pass company and role, which must match exactly one application. " +
         "The note is stored as \"Stage: note\" and dated with date (YYYY-MM-DD, default today). " +
-        "Pass the application's current stage when the stage is unchanged and only the note is new.")]
+        "Pass the application's current stage when the stage is unchanged and only the note is new. " +
+        "Numbered stages like \"2nd interview\" create/update that round. " +
+        "Plain \"Interview\" only moves the funnel stage — use upsert_interview_contact (omit round) so each person gets their own round (Greg=1, Kathy=2). " +
+        "payRange in the response is hidden unless bananasKeyword is bananas.")]
     public string UpdateStatus(
-        [Description("New stage. Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, or Withdrawn.")]
+        [Description("New stage. Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, or Withdrawn. Or a numbered interview like 2nd interview.")]
         string stage,
         [Description("What happened. Stored with the stage and a date, for example a recruiter reply or an interview time.")]
         string note,
@@ -117,67 +137,77 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         [Description("Role title. Used with company only when id is omitted.")]
         string? role = null,
         [Description("Date of this update, as YYYY-MM-DD. Defaults to today. An older date stays on the note and does not move lastUpdate backward.")]
-        string? date = null)
+        string? date = null,
+        [Description("Pass the exact keyword bananas to include payRange in the response. Omit to keep financial amounts hidden.")]
+        string? bananasKeyword = null)
     {
         var noteDate = ParseDate(date, "date");
         var application = store.UpdateStatus(id, company, role, stage, note, noteDate);
 
-        // "I'm in the 2nd interview" → also ensure that round exists under interviews[].
+        // Only numbered phrases create/update a specific round. Bare "Interview" must not reuse round 1.
         if (StageNames.TryParseInterviewRound(stage, out var round))
             application = store.UpsertInterview(application.Id, round, interviewDate: noteDate, notes: null);
 
+        var reveal = FinancialAccess.IsUnlocked(bananasKeyword);
         return PipelineJson.Serialize(new
         {
             message = $"Updated {application.Company}, {application.Role} (id {application.Id}) to {application.Stage}.",
-            application,
+            financialsRevealed = reveal,
+            application = FinancialAccess.Present(application, reveal),
         });
     }
 
     [McpServerTool(Name = "upsert_interview", Title = "Upsert interview round", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
     [Description(
-        "Create or update a numbered interview round on an application (1 = first, 2 = second, …). " +
-        "Call this when the user says they have a 1st/2nd/3rd interview, or wants to set the date or notes for that round. " +
+        "Create or update a numbered interview round on an application. " +
+        "Pass round (1, 2, 3, …) to target that round, or omit round to append a new round. " +
+        "Call this for round date/notes. For who they met in a conversation, prefer upsert_interview_contact " +
+        "(omit round to give each person their own round: Greg=Interview 1, Kathy=Interview 2). " +
         "Sets the application stage to Interview. " +
-        "To record who they met, follow with upsert_interview_contact. " +
-        "Pass application id from list_applications.")]
+        "payRange in the response is hidden unless bananasKeyword is bananas.")]
     public string UpsertInterview(
         [Description("Application id from list_applications.")]
         string id,
-        [Description("Interview round number. 1 = first interview, 2 = second, and so on.")]
-        int round,
+        [Description("Interview round number. 1 = first, 2 = second, …. Omit to append the next new round.")]
+        int? round = null,
         [Description("Date of the interview as YYYY-MM-DD. Optional.")]
         string? date = null,
         [Description("Notes about the round overall (agenda, outcome). Optional; pass empty string to clear.")]
-        string? notes = null)
+        string? notes = null,
+        [Description("Pass the exact keyword bananas to include payRange in the response. Omit to keep financial amounts hidden.")]
+        string? bananasKeyword = null)
     {
         DateOnly? interviewDate = null;
         if (!string.IsNullOrWhiteSpace(date))
             interviewDate = ParseDate(date, "date");
 
-        // Distinguish omitted notes (null → leave) from explicit clear ("" → clear).
-        string? notesArg = notes;
-        var application = store.UpsertInterview(id, round, interviewDate, notesArg);
-        var interview = application.Interviews.First(item => item.Round == round);
+        var application = store.UpsertInterview(id, round, interviewDate, notes);
+        var interview = round is not null
+            ? application.Interviews.First(item => item.Round == round.Value)
+            : application.Interviews.OrderByDescending(item => item.Round).First();
+        var reveal = FinancialAccess.IsUnlocked(bananasKeyword);
         return PipelineJson.Serialize(new
         {
-            message = $"Interview round {round} saved on {application.Company}, {application.Role} (id {application.Id}).",
+            message = $"Interview round {interview.Round} saved on {application.Company}, {application.Role} (id {application.Id}).",
             interview,
-            application,
+            financialsRevealed = reveal,
+            application = FinancialAccess.Present(application, reveal),
         });
     }
 
     [McpServerTool(Name = "upsert_interview_contact", Title = "Upsert interview contact", ReadOnly = false, Idempotent = false, Destructive = false, OpenWorld = false)]
     [Description(
-        "Add or update a person met in an interview round. " +
-        "Call this when the user names who they interviewed with, their title, or what they spoke about. " +
-        "To add: pass application id, round, and name (title/notes optional). " +
-        "To update: pass contactId from list_applications (interviews[].contacts) plus any fields to change. " +
-        "Creates the interview round if it does not exist yet.")]
+        "Add or update a person met in an interview conversation. " +
+        "Preferred for \"I interviewed with Greg, then Kathy\": omit round when adding so each person gets a new round " +
+        "(Greg → round 1, Kathy → round 2). " +
+        "Pass round only when adding someone to an existing round, or contactId to update that person. " +
+        "Optional date stamps the round. " +
+        "payRange in the response is hidden unless bananasKeyword is bananas.")]
     public string UpsertInterviewContact(
         [Description("Application id from list_applications.")]
         string id,
-        [Description("Interview round number this person belongs to. 1 = first interview, 2 = second, …")]
-        int round,
+        [Description("Interview round number. Omit when adding a new conversation/person so a new round is created.")]
+        int? round = null,
         [Description("Contact id from interviews[].contacts when updating an existing person. Omit when adding.")]
         string? contactId = null,
         [Description("Person's name. Required when adding; optional when updating.")]
@@ -185,19 +215,43 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         [Description("Person's title, for example Engineering Manager. Pass empty string to clear.")]
         string? title = null,
         [Description("Notes on what you spoke about with this person. Pass empty string to clear.")]
-        string? notes = null)
+        string? notes = null,
+        [Description("Date of this conversation as YYYY-MM-DD. Optional.")]
+        string? date = null,
+        [Description("Pass the exact keyword bananas to include payRange in the response. Omit to keep financial amounts hidden.")]
+        string? bananasKeyword = null)
     {
-        var application = store.UpsertInterviewContact(id, round, contactId, name, title, notes);
-        var interview = application.Interviews.First(item => item.Round == round);
-        var contact = !string.IsNullOrWhiteSpace(contactId)
-            ? interview.Contacts.First(item => string.Equals(item.Id, contactId.Trim(), StringComparison.OrdinalIgnoreCase))
-            : interview.Contacts.Last();
+        DateOnly? interviewDate = null;
+        if (!string.IsNullOrWhiteSpace(date))
+            interviewDate = ParseDate(date, "date");
+
+        var application = store.UpsertInterviewContact(id, round, contactId, name, title, notes, interviewDate);
+
+        InterviewRound interview;
+        InterviewContact contact;
+        if (!string.IsNullOrWhiteSpace(contactId))
+        {
+            interview = application.Interviews.First(i =>
+                i.Contacts.Any(c => string.Equals(c.Id, contactId.Trim(), StringComparison.OrdinalIgnoreCase)));
+            contact = interview.Contacts.First(c =>
+                string.Equals(c.Id, contactId.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+        else
+        {
+            interview = round is not null
+                ? application.Interviews.First(item => item.Round == round.Value)
+                : application.Interviews.OrderByDescending(item => item.Round).First();
+            contact = interview.Contacts.Last();
+        }
+
+        var reveal = FinancialAccess.IsUnlocked(bananasKeyword);
         return PipelineJson.Serialize(new
         {
-            message = $"Contact {contact.Name} saved on interview round {round} for {application.Company}, {application.Role}.",
+            message = $"Contact {contact.Name} saved on interview round {interview.Round} for {application.Company}, {application.Role}.",
             contact,
             interview,
-            application,
+            financialsRevealed = reveal,
+            application = FinancialAccess.Present(application, reveal),
         });
     }
 
