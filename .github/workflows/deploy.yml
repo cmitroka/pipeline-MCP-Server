@@ -20,6 +20,9 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      # Keep this on one line. Multiline env blocks and values with spaces
+      # (e.g. Gmail app passwords) break `az containerapp update --replace-env-vars`.
+      # GMAIL_APP_PASSWORD is applied as a Container App secret in the next step.
       - name: Build and deploy Container App
         uses: azure/container-apps-deploy-action@v2
         with:
@@ -28,23 +31,21 @@ jobs:
           containerAppName: pipeline-mcp
           resourceGroup: pipeline-mcp-rg
           imageToBuild: cjmpipelinemcp.azurecr.io/pipeline-mcp:${{ github.sha }}
-          environmentVariables: |
-            MCP_API_KEY=${{ secrets.MCP_API_KEY }}
-            JOB_PIPELINE_FILE=/mnt/pipeline/pipeline.json
-            GMAIL_ADDRESS=${{ secrets.GMAIL_ADDRESS }}
-            GMAIL_APP_PASSWORD=${{ secrets.GMAIL_APP_PASSWORD }}
+          environmentVariables: MCP_API_KEY=${{ secrets.MCP_API_KEY }} JOB_PIPELINE_FILE=/mnt/pipeline/pipeline.json GMAIL_ADDRESS=${{ secrets.GMAIL_ADDRESS }}
 
       # container-apps-deploy-action can drop volume mounts; re-apply Azure Files after each deploy.
-      - name: Ensure Azure Files mount
+      - name: Ensure Azure Files mount and Gmail secret
         env:
           MCP_API_KEY: ${{ secrets.MCP_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: |
+          set -euo pipefail
           IMAGE=$(az containerapp show -n pipeline-mcp -g pipeline-mcp-rg --query "properties.template.containers[0].image" -o tsv)
-          # Store Gmail app password as a Container App secret, then reference it.
+          PASSWORD_NO_SPACES="${GMAIL_APP_PASSWORD// /}"
           az containerapp secret set -n pipeline-mcp -g pipeline-mcp-rg \
-            --secrets "gmail-app-password=${GMAIL_APP_PASSWORD// /}"
+            --secrets "gmail-app-password=${PASSWORD_NO_SPACES}"
+
           cat > /tmp/pipeline-mount.yaml <<EOF
           properties:
             template:
