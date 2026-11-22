@@ -19,7 +19,7 @@ Each application has:
 | `payRange` | Free-text pay (or a numeric salary). Set once at create or later via `update_application`; after that it cannot change. Tools never return the amount — only `hasPayRange` |
 | `location` | Optional work location |
 | `link` | Posting or application URL |
-| `notes` | Dated notes. A status update is stored as `"Stage: what happened"` |
+| `notes` | Dated notes. A status update is stored as `"Stage: what happened"`. Tool responses redact salary/comp figures (amounts become `[redacted]`) |
 | `interviews` | Numbered interview rounds (1st, 2nd, …), each with date, notes, and people met |
 | `stagesReached` | Stages the application has actually entered, oldest first. Conversion rates use this |
 
