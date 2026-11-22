@@ -15,8 +15,9 @@ Each application has:
 | `role` | Role title |
 | `stage` | Current stage |
 | `dateApplied` | Date you applied (`YYYY-MM-DD`) |
-| `lastUpdate` | Date of the latest note, or the applied date when there are no later notes |
-| `payRange` | Free-text pay range |
+| `lastUpdate` | Date of the latest change or note (UTC calendar date) |
+| `payRange` | Free-text pay range (or a numeric salary set once via `update_application`) |
+| `location` | Optional work location |
 | `link` | Posting or application URL |
 | `notes` | Dated notes. A status update is stored as `"Stage: what happened"` |
 | `stagesReached` | Stages the application has actually entered, oldest first. Conversion rates use this |
@@ -61,7 +62,8 @@ The file is created the first time an application is added. It is listed in `.gi
 | --- | --- |
 | `list_applications` | You want to see the pipeline, check a company, or look up an id. Optional `stage` filter. |
 | `add_application` | You applied, or you want to start tracking a company and role. |
-| `update_status` | Something happened on an application already in the pipeline: a reply, interview, offer, rejection, withdrawal, or a note. |
+| `update_application` | Any field change on an existing application (company, title, status, salary, location, dates, notes, url). |
+| `update_status` | Stage move plus a dated note on an application already in the pipeline. |
 | `pipeline_stats` | You want counts, conversion rates, or the roles with no update in 10 or more days. |
 | `search_jobs` | You want public LinkedIn guest listings to choose from before calling `add_application`. |
 | `import_inbox_receipts` | You want to scan Gmail application confirmations and add new jobs without opening each email in the model. |

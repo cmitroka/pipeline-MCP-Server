@@ -30,6 +30,7 @@ builder.Services
             "When the user asks to go through inbox receipts or add jobs from email confirmations, " +
             "call import_inbox_receipts once — do not open individual Gmail messages for that flow. " +
             "Use search_jobs to fetch public LinkedIn guest listings, then ask which ones to track with add_application. " +
+            "Use update_application for any change to an existing application; do not edit pipeline.json directly. " +
             "Use an application id from list_applications when company and role could match more than one row.";
     })
     .WithHttpTransport()

@@ -9,6 +9,7 @@ public sealed class JobApplication
     public DateOnly DateApplied { get; set; }
     public DateOnly LastUpdate { get; set; }
     public string? PayRange { get; set; }
+    public string? Location { get; set; }
     public string? Link { get; set; }
     public List<Note> Notes { get; set; } = [];
 
