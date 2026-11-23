@@ -37,6 +37,7 @@ builder.Services
             "Use update_application for any change to an existing application; do not edit pipeline.json directly. " +
             "Pay/salary can be set only when never set; once stored it cannot change. " +
             "Stored pay amounts are never returned by tools; hasPayRange only indicates whether pay is stored. " +
+            "Salary or compensation figures inside notes are redacted in tool responses. " +
             "Use an application id from list_applications when company and role could match more than one row.";
     })
     .WithHttpTransport()
@@ -82,5 +83,10 @@ static string ResolvePipelinePath()
     if (!string.IsNullOrWhiteSpace(configured))
         return Path.GetFullPath(configured.Trim());
 
-    return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "pipeline.json"));
+    // Keep data outside the repo/workspace so a coding agent cannot casually rewrite it.
+    var dataDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "JobPipeline");
+    Directory.CreateDirectory(dataDir);
+    return Path.Combine(dataDir, "pipeline.json");
 }

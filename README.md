@@ -19,7 +19,7 @@ Each application has:
 | `payRange` | Free-text pay (or a numeric salary). Set once at create or later via `update_application`; after that it cannot change. Tools never return the amount — only `hasPayRange` |
 | `location` | Optional work location |
 | `link` | Posting or application URL |
-| `notes` | Dated notes. A status update is stored as `"Stage: what happened"` |
+| `notes` | Dated notes. A status update is stored as `"Stage: what happened"`. Tool responses redact salary/comp figures (amounts become `[redacted]`) |
 | `interviews` | Numbered interview rounds (1st, 2nd, …), each with date, notes, and people met |
 | `stagesReached` | Stages the application has actually entered, oldest first. Conversion rates use this |
 
@@ -97,25 +97,31 @@ Optional env vars:
 
 | Variable | Purpose |
 | --- | --- |
-| `JOB_PIPELINE_FILE` | Pin the data file path (default: `pipeline.json` in the working directory) |
+| `JOB_PIPELINE_FILE` | Pin the data file path (default on Windows: `%LOCALAPPDATA%\JobPipeline\pipeline.json`, outside the repo) |
 | `MCP_API_KEY` | Require an `X-Api-Key` header on `/mcp` |
 | `GMAIL_ADDRESS` | Gmail address for `import_inbox_receipts` (IMAP) |
 | `GMAIL_APP_PASSWORD` | Gmail [app password](https://myaccount.google.com/apppasswords) (POC; spaces optional) |
 | `IMAP_HOST` / `IMAP_PORT` | Defaults `imap.gmail.com` / `993` |
 
-Docker example with inbox import:
+Docker example with inbox import (data outside the repo so the coding agent cannot edit it):
 
 ```powershell
-docker run --rm -p 8080:8080 `
-  -v pipeline-data:/data `
+$data = Join-Path $env:LOCALAPPDATA 'JobPipeline'
+New-Item -ItemType Directory -Force -Path $data | Out-Null
+
+docker rm -f pipeline-mcp-dev 2>$null
+docker build -t pipeline-mcp .
+docker run --rm -d -p 8080:8080 `
+  -v "${data}:/data" `
   -e JOB_PIPELINE_FILE=/data/pipeline.json `
   -e MCP_API_KEY=mitrokatest `
   -e GMAIL_ADDRESS=you@gmail.com `
   -e GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx `
+  --name pipeline-mcp-dev `
   pipeline-mcp
 ```
 
-The `pipeline-data` volume keeps `pipeline.json` after the container exits.
+Each save writes `pipeline.json.bak` (previous version) and a timestamped copy under `backups/` (last 20 kept).
 
 Typical prompt after that: “Go through inbox receipts and add new jobs to the pipeline.” The model should call `import_inbox_receipts` once.
 

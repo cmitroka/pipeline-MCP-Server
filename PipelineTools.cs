@@ -16,7 +16,8 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         "Stage names: Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, Withdrawn. " +
         "Phone screen and screening match Recruiter screen. Onsite / 2nd interview map to Interview. " +
         "Numbered interview rounds and people met live under applications[].interviews. " +
-        "Stored pay amounts are never returned; hasPayRange only shows whether pay is stored.")]
+        "Stored pay amounts are never returned; hasPayRange only shows whether pay is stored. " +
+        "Salary/comp figures inside notes are replaced with [redacted].")]
     public string ListApplications(
         [Description("Optional current stage to keep. Omit to list every application. Applied, Recruiter screen, Interview, Offer, Accepted, Rejected, or Withdrawn.")]
         string? stage = null)
@@ -168,7 +169,7 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         return PipelineJson.Serialize(new
         {
             message = $"Interview round {interview.Round} saved on {application.Company}, {application.Role} (id {application.Id}).",
-            interview,
+            interview = FinancialAccess.PresentInterview(interview),
             application = FinancialAccess.Present(application),
         });
     }
@@ -222,8 +223,8 @@ public sealed class PipelineTools(PipelineStore store, LinkedInJobSearch jobSear
         return PipelineJson.Serialize(new
         {
             message = $"Contact {contact.Name} saved on interview round {interview.Round} for {application.Company}, {application.Role}.",
-            contact,
-            interview,
+            contact = FinancialAccess.PresentContact(contact),
+            interview = FinancialAccess.PresentInterview(interview),
             application = FinancialAccess.Present(application),
         });
     }

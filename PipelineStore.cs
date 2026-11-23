@@ -511,6 +511,8 @@ public sealed class PipelineStore
         }
     }
 
+    private const int MaxTimestampedBackups = 20;
+
     private void Save(PipelineFile file)
     {
         var directory = Path.GetDirectoryName(_path);
@@ -521,6 +523,7 @@ public sealed class PipelineStore
         var temp = _path + ".tmp";
         try
         {
+            BackupExistingFile();
             File.WriteAllText(temp, json);
             File.Move(temp, _path, overwrite: true);
         }
@@ -537,6 +540,44 @@ public sealed class PipelineStore
             }
 
             throw new McpException($"Could not save {_path}. {ex.Message}");
+        }
+    }
+
+    private void BackupExistingFile()
+    {
+        if (!File.Exists(_path))
+            return;
+
+        // Always keep the previous version next to the live file for easy restore.
+        var previous = _path + ".bak";
+        File.Copy(_path, previous, overwrite: true);
+
+        // Also keep a short rolling history of timestamped snapshots.
+        var backupDir = Path.Combine(
+            Path.GetDirectoryName(_path) ?? ".",
+            "backups");
+        Directory.CreateDirectory(backupDir);
+
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ");
+        var stamped = Path.Combine(
+            backupDir,
+            $"{Path.GetFileNameWithoutExtension(_path)}.{stamp}.json");
+        File.Copy(_path, stamped, overwrite: true);
+
+        var old = Directory.EnumerateFiles(backupDir, $"{Path.GetFileNameWithoutExtension(_path)}.*.json")
+            .OrderByDescending(path => path, StringComparer.Ordinal)
+            .Skip(MaxTimestampedBackups)
+            .ToList();
+        foreach (var path in old)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException)
+            {
+                // Best-effort prune; a stuck old backup is not a save failure.
+            }
         }
     }
 
@@ -675,8 +716,34 @@ public sealed class PipelineStore
 
 internal static class FinancialAccess
 {
+    // Money / comp figures that should never leave the server in tool responses.
+    private static readonly System.Text.RegularExpressions.Regex[] FinancialPatterns =
+    [
+        // $160k, $160-180k, $160,000.50
+        new(
+            @"\$\s*\d[\d,]*(?:\.\d+)?(?:\s*[kKmMbB])?(?:\s*(?:-|–|—|/|to)\s*\$?\s*\d[\d,]*(?:\.\d+)?(?:\s*[kKmMbB])?)?",
+            System.Text.RegularExpressions.RegexOptions.Compiled),
+        // 160-180k, 90 to 110k, 1.2-1.5M
+        new(
+            @"\b\d{1,4}(?:\.\d+)?\s*(?:-|–|—|/|to)\s*\d{1,4}(?:\.\d+)?\s*[kKmM]\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase),
+        // 175k, 1.2M
+        new(
+            @"\b\d{1,3}(?:\.\d+)?\s*[kKmM]\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled),
+        // 90 EUR/hour, USD 160000, GBP 120,000
+        new(
+            @"\b(?:USD|EUR|GBP|CAD|AUD)\s*\d[\d,]*(?:\.\d+)?(?:\s*[kKmM])?\b|\b\d[\d,]*(?:\.\d+)?\s*(?:USD|EUR|GBP|CAD|AUD)(?:\s*/\s*hour)?\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase),
+        // "salary 185000", "comp: 160-180", "OTE was 200000", "base pay of 150,000"
+        new(
+            @"\b(?:salary|compensation|\bcomp\b|base(?:\s+pay)?|ote|t\.?c\.?|total\s+comp(?:ensation)?|package|equity|rsus?|bonus)\b[^\n\r.!?]{0,40}?\d[\d,]*(?:\.\d+)?(?:\s*[kKmM])?",
+            System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase),
+    ];
+
     /// <summary>
     /// MCP responses never include pay amounts. hasPayRange only indicates whether one is stored.
+    /// Notes and interview notes have salary/comp figures redacted.
     /// </summary>
     public static object Present(JobApplication application)
     {
@@ -693,14 +760,60 @@ internal static class FinancialAccess
             hasPayRange,
             application.Location,
             application.Link,
-            application.Notes,
-            application.Interviews,
+            notes = PresentNotes(application.Notes),
+            interviews = PresentInterviews(application.Interviews),
             application.StagesReached,
         };
     }
 
     public static IReadOnlyList<object> PresentAll(IEnumerable<JobApplication> applications) =>
         applications.Select(Present).ToList();
+
+    public static object PresentInterview(InterviewRound interview) =>
+        new
+        {
+            interview.Id,
+            interview.Round,
+            interview.Date,
+            notes = Redact(interview.Notes),
+            interview.LastUpdate,
+            contacts = interview.Contacts.Select(PresentContact).ToList(),
+        };
+
+    public static object PresentContact(InterviewContact contact) =>
+        new
+        {
+            contact.Id,
+            contact.Name,
+            contact.Title,
+            notes = Redact(contact.Notes),
+        };
+
+    public static string? Redact(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        var redacted = text;
+        foreach (var pattern in FinancialPatterns)
+            redacted = pattern.Replace(redacted, "[redacted]");
+
+        // Collapse repeated redaction tokens from overlapping matches.
+        while (redacted.Contains("[redacted][redacted]", StringComparison.Ordinal))
+            redacted = redacted.Replace("[redacted][redacted]", "[redacted]", StringComparison.Ordinal);
+
+        return redacted;
+    }
+
+    private static IReadOnlyList<object> PresentNotes(IEnumerable<Note> notes) =>
+        notes.Select(note => (object)new
+        {
+            note.Date,
+            text = Redact(note.Text) ?? "",
+        }).ToList();
+
+    private static IReadOnlyList<object> PresentInterviews(IEnumerable<InterviewRound> interviews) =>
+        interviews.Select(PresentInterview).ToList();
 }
 
 internal static class PipelineJson
