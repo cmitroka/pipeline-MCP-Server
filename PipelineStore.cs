@@ -511,6 +511,8 @@ public sealed class PipelineStore
         }
     }
 
+    private const int MaxTimestampedBackups = 20;
+
     private void Save(PipelineFile file)
     {
         var directory = Path.GetDirectoryName(_path);
@@ -521,6 +523,7 @@ public sealed class PipelineStore
         var temp = _path + ".tmp";
         try
         {
+            BackupExistingFile();
             File.WriteAllText(temp, json);
             File.Move(temp, _path, overwrite: true);
         }
@@ -537,6 +540,44 @@ public sealed class PipelineStore
             }
 
             throw new McpException($"Could not save {_path}. {ex.Message}");
+        }
+    }
+
+    private void BackupExistingFile()
+    {
+        if (!File.Exists(_path))
+            return;
+
+        // Always keep the previous version next to the live file for easy restore.
+        var previous = _path + ".bak";
+        File.Copy(_path, previous, overwrite: true);
+
+        // Also keep a short rolling history of timestamped snapshots.
+        var backupDir = Path.Combine(
+            Path.GetDirectoryName(_path) ?? ".",
+            "backups");
+        Directory.CreateDirectory(backupDir);
+
+        var stamp = DateTime.UtcNow.ToString("yyyyMMddTHHmmssZ");
+        var stamped = Path.Combine(
+            backupDir,
+            $"{Path.GetFileNameWithoutExtension(_path)}.{stamp}.json");
+        File.Copy(_path, stamped, overwrite: true);
+
+        var old = Directory.EnumerateFiles(backupDir, $"{Path.GetFileNameWithoutExtension(_path)}.*.json")
+            .OrderByDescending(path => path, StringComparer.Ordinal)
+            .Skip(MaxTimestampedBackups)
+            .ToList();
+        foreach (var path in old)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException)
+            {
+                // Best-effort prune; a stuck old backup is not a save failure.
+            }
         }
     }
 

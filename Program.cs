@@ -83,5 +83,10 @@ static string ResolvePipelinePath()
     if (!string.IsNullOrWhiteSpace(configured))
         return Path.GetFullPath(configured.Trim());
 
-    return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "pipeline.json"));
+    // Keep data outside the repo/workspace so a coding agent cannot casually rewrite it.
+    var dataDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "JobPipeline");
+    Directory.CreateDirectory(dataDir);
+    return Path.Combine(dataDir, "pipeline.json");
 }
